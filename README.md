@@ -57,14 +57,12 @@ Body:
 ```
 Response:
 ```json
-{ "token": "<JWT>", "patient": { ... بيانات المريض كاملة ... } }
+{ "token": "<JWT>", "patient": { ... all patient data ... } }
 ```
 
 ### 5.3 Current user profile
 `GET /auth/me`
 Headers:
-`Authorization: Bearer <JWT>`
-Response: بيانات المريض + الوصفات + الطبيب + الـ Care Giver.
 
 ### 5.4 Logout (token revocation)
 `POST /auth/logout`
