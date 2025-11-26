@@ -10,9 +10,13 @@ class JWTError(Exception):
     pass
 
 def _get_secret():
+    # Read secret from environment, prefer explicit JWT_SECRET
     secret = os.getenv('JWT_SECRET') or os.getenv('SECRET_KEY')
     if not secret:
         raise JWTError('JWT secret not configured (set JWT_SECRET or SECRET_KEY).')
+    # Strip surrounding whitespace/newlines which commonly break signature verification
+    if isinstance(secret, str):
+        secret = secret.strip()
     return secret
 
 def _get_exp_minutes(overridden: int | None = None) -> int:
@@ -35,6 +39,12 @@ def create_access_token(sub: str, role: str | None = None, extra: dict | None = 
     if extra:
         payload.update(extra)
     token = jwt.encode(payload, _get_secret(), algorithm='HS256')
+    # PyJWT may return bytes on some versions/configs; ensure we return a str
+    if isinstance(token, (bytes, bytearray)):
+        try:
+            token = token.decode('utf-8')
+        except Exception:
+            token = str(token)
     return token
 
 def decode_token(token: str):
