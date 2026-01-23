@@ -2,8 +2,6 @@ import os
 import datetime as dt
 import jwt
 from typing import Set
-from flask import request, jsonify
-from functools import wraps
 
 DEFAULT_EXP_MINUTES = 60
 _blacklist: Set[str] = set()
@@ -12,9 +10,13 @@ class JWTError(Exception):
     pass
 
 def _get_secret():
+    # Read secret from environment, prefer explicit JWT_SECRET
     secret = os.getenv('JWT_SECRET') or os.getenv('SECRET_KEY')
     if not secret:
         raise JWTError('JWT secret not configured (set JWT_SECRET or SECRET_KEY).')
+    # Strip surrounding whitespace/newlines which commonly break signature verification
+    if isinstance(secret, str):
+        secret = secret.strip()
     return secret
 
 def _get_exp_minutes(overridden: int | None = None) -> int:
@@ -37,6 +39,12 @@ def create_access_token(sub: str, role: str | None = None, extra: dict | None = 
     if extra:
         payload.update(extra)
     token = jwt.encode(payload, _get_secret(), algorithm='HS256')
+    # PyJWT may return bytes on some versions/configs; ensure we return a str
+    if isinstance(token, (bytes, bytearray)):
+        try:
+            token = token.decode('utf-8')
+        except Exception:
+            token = str(token)
     return token
 
 def decode_token(token: str):
@@ -46,33 +54,11 @@ def decode_token(token: str):
         return jwt.decode(token, _get_secret(), algorithms=['HS256'])
     except jwt.ExpiredSignatureError as e:
         raise JWTError('Token expired') from e
-    except jwt.InvalidSignatureError as e:
-        raise JWTError('Invalid signature') from e
-    except Exception as e:
-        raise JWTError(f'Token validation failed: {e}')
+    except jwt.InvalidTokenError as e:
+        raise JWTError('Invalid token') from e
 
 def revoke_token(token: str):
     _blacklist.add(token)
 
-def _get_token_from_header():
-    auth_header = request.headers.get('Authorization')
-    if auth_header and auth_header.startswith('Bearer '):
-        return auth_header.split(' ')[1]
-    return None
-
-def jwt_required():
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            token = _get_token_from_header()
-            if not token:
-                return jsonify({'error': 'Missing Authorization Header'}), 401
-            try:
-                payload = decode_token(token)
-                # تخزين البيانات في الـ request لاستخدامها لاحقاً
-                request.current_user_payload = payload
-            except JWTError as e:
-                return jsonify({'error': str(e)}), 401
-            return f(*args, **kwargs)
-        return wrapper
-    return decorator
+def is_revoked(token: str) -> bool:
+    return token in _blacklist

@@ -64,5 +64,8 @@ def create_app():
     # Register blueprints
     from .routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
+    
+    from app.routes.chat import chat_bp
+    app.register_blueprint(chat_bp, url_prefix='/chat')    
 
     return app
