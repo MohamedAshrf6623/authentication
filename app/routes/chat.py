@@ -21,8 +21,8 @@ from gtts import gTTS
 from pydub import AudioSegment
 
 # مكتبات الذاكرة
-import chromadb
-from sentence_transformers import SentenceTransformer
+# import chromadb
+# from sentence_transformers import SentenceTransformer
 
 chat_bp = Blueprint('chat', __name__)
 
@@ -40,10 +40,10 @@ try:
     
     # تحميل موديل التضمين (Embeddings)
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-    print("✅ Vector DB & Model Loaded Successfully")
+    print("[OK] Vector DB & Model Loaded Successfully")
     
 except Exception as e:
-    print(f"❌ Critical Warning: Vector DB could not load: {e}")
+    print(f"[ERROR] Critical Warning: Vector DB could not load: {e}")
     chroma_client = None
     collection = None
     embedding_model = None

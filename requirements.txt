@@ -5,9 +5,11 @@ python-dotenv==1.0.1
 passlib[bcrypt]==1.7.4
 Flask-Migrate==4.0.5
 PyJWT==2.9.0
-langchain-google-genai 
-langchain textblob
-ffmpeg
-SpeechRecognition gTTS pydub
+langchain-google-genai
+langchain
+textblob
+SpeechRecognition
+gTTS
+pydub
 chromadb
 sentence-transformers

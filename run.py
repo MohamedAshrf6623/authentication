@@ -4,4 +4,4 @@ app = create_app()
 
 if __name__ == '__main__':
     # For development only; use a proper WSGI server (gunicorn/uvicorn) in production
-    app.run(host='0.0.0.0', port=5005, debug=True)
+    app.run(host='0.0.0.0', port=5005, debug=True, use_reloader=False)
