@@ -1,5 +1,7 @@
 import os
 import datetime as dt
+import hashlib
+import hmac
 import jwt
 from typing import Set
 from flask import request, jsonify
@@ -10,6 +12,41 @@ _blacklist: Set[str] = set()
 
 class JWTError(Exception):
     pass
+
+
+def build_password_signature(password_hash: str | None):
+    if not password_hash:
+        return None
+    secret = _get_secret().encode('utf-8')
+    payload = password_hash.encode('utf-8')
+    return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+
+def _to_unix_timestamp(value):
+    if isinstance(value, dt.datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        return int(value.timestamp())
+    return None
+
+
+def _load_current_user(payload: dict):
+    role = payload.get('role')
+    sub = payload.get('sub')
+    if not role or not sub:
+        raise JWTError('Invalid token payload')
+
+    if role == 'patient':
+        from app.models.patient import Patient
+        return Patient.query.filter_by(patient_id=sub).first()
+    if role == 'doctor':
+        from app.models.doctor import Doctor
+        return Doctor.query.filter_by(doctor_id=sub).first()
+    if role == 'caregiver':
+        from app.models.caregiver import CareGiver
+        return CareGiver.query.filter_by(care_giver_id=sub).first()
+
+    raise JWTError('Invalid token role')
 
 def _get_secret():
     secret = os.getenv('JWT_SECRET') or os.getenv('SECRET_KEY')
@@ -69,8 +106,31 @@ def jwt_required():
                 return jsonify({'error': 'Missing Authorization Header'}), 401
             try:
                 payload = decode_token(token)
+                current_user = _load_current_user(payload)
+                if not current_user:
+                    raise JWTError('User no longer exists')
+
+                token_iat = payload.get('iat')
+                password_changed_at = (
+                    getattr(current_user, 'password_changed_at', None)
+                    or getattr(current_user, 'passwordChangedAt', None)
+                )
+                changed_ts = _to_unix_timestamp(password_changed_at)
+
+                if changed_ts and token_iat and changed_ts > int(token_iat):
+                    raise JWTError('Password changed after token was issued')
+
+                token_password_sig = payload.get('pwd_sig')
+                current_password_sig = build_password_signature(getattr(current_user, 'password', None))
+                if not token_password_sig:
+                    raise JWTError('Token missing security claim; please log in again')
+                if token_password_sig and current_password_sig:
+                    if not hmac.compare_digest(token_password_sig, current_password_sig):
+                        raise JWTError('Password changed after token was issued')
+
                 # تخزين البيانات في الـ request لاستخدامها لاحقاً
                 request.current_user_payload = payload
+                request.current_user = current_user
             except JWTError as e:
                 return jsonify({'error': str(e)}), 401
             return f(*args, **kwargs)

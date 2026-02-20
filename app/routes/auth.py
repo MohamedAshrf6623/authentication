@@ -5,7 +5,7 @@ from app.models.prescription import MPrescription
 from app.models.medicine import Medicine
 from app.models.doctor import Doctor
 from app import db
-from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_token
+from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_token, build_password_signature
 from sqlalchemy import or_, func
 import re
 from uuid import uuid4
@@ -101,8 +101,12 @@ def _doctor_to_dict(doctor: Doctor):
         ]
     }
 
-def _issue_token(subject: str, role: str):
-    return create_access_token(subject, role=role)
+def _issue_token(subject: str, role: str, password_hash: str | None = None):
+    extra = None
+    pwd_sig = build_password_signature(password_hash)
+    if pwd_sig:
+        extra = {'pwd_sig': pwd_sig}
+    return create_access_token(subject, role=role, extra=extra)
 
 
 def _normalize_email(email: str):
@@ -161,7 +165,7 @@ def _register_patient(data: dict):
     db.session.add(patient)
     db.session.commit()
 
-    token = _issue_token(str(patient.patient_id), 'patient')
+    token = _issue_token(str(patient.patient_id), 'patient', patient.password)
     return jsonify({'token': token, 'patient': _patient_to_dict(patient)}), 201
 
 
@@ -194,7 +198,7 @@ def _register_doctor(data: dict):
     db.session.add(doctor)
     db.session.commit()
 
-    token = _issue_token(str(doctor.doctor_id), 'doctor')
+    token = _issue_token(str(doctor.doctor_id), 'doctor', doctor.password)
     return jsonify({'token': token, 'doctor': _doctor_to_dict(doctor)}), 201
 
 
@@ -225,7 +229,7 @@ def _register_caregiver(data: dict):
     db.session.add(caregiver)
     db.session.commit()
 
-    token = _issue_token(str(caregiver.care_giver_id), 'caregiver')
+    token = _issue_token(str(caregiver.care_giver_id), 'caregiver', caregiver.password)
     return jsonify({'token': token, 'caregiver': _caregiver_to_dict(caregiver)}), 201
 
 @auth_bp.route('/register', methods=['POST'])
@@ -303,13 +307,13 @@ def login():
         return jsonify({'error': 'invalid credentials'}), 401
 
     if user_role == 'patient':
-        token = create_access_token(str(user_obj.patient_id), role=user_role)
+        token = _issue_token(str(user_obj.patient_id), user_role, user_obj.password)
         return jsonify({'token': token, 'role': user_role, 'patient': _patient_to_dict(user_obj)}), 200
     elif user_role == 'doctor':
-        token = create_access_token(str(user_obj.doctor_id), role=user_role)
+        token = _issue_token(str(user_obj.doctor_id), user_role, user_obj.password)
         return jsonify({'token': token, 'role': user_role, 'doctor': _doctor_to_dict(user_obj)}), 200
     else:  # caregiver
-        token = create_access_token(str(user_obj.care_giver_id), role=user_role)
+        token = _issue_token(str(user_obj.care_giver_id), user_role, user_obj.password)
         return jsonify({'token': token, 'role': user_role, 'caregiver': _caregiver_to_dict(user_obj)}), 200
 
 @auth_bp.route('/me', methods=['GET'])
