@@ -10,7 +10,7 @@ except ImportError:
 import os
 import uuid
 from datetime import datetime
-from flask import request, jsonify, send_file
+from flask import request, send_file
 import google.generativeai as genai
 from app.models.patient import Patient
 import speech_recognition as sr
@@ -19,6 +19,8 @@ from pydub import AudioSegment
 
 import chromadb
 from sentence_transformers import SentenceTransformer
+from app.utils.error_handler import handle_errors, AppError, ValidationError
+from app.utils.response import success_response
 
 
 DB_PATH = "/home/ubuntu/mobile/authentication/vector_db"
@@ -183,16 +185,17 @@ def text_to_speech(text, output_path):
         return False
 
 
+@handle_errors('AI Error')
 def ask_text():
     payload = getattr(request, 'current_user_payload', None)
     if not payload or payload.get('role') != 'patient':
-        return jsonify({"error": "Access denied."}), 403
+        raise AppError('Access denied.', status_code=403)
 
     patient_id = payload.get('sub')
-    data = request.get_json()
+    data = request.get_json() or {}
     question = data.get('message')
     if not question:
-        return jsonify({"error": "Message required"}), 400
+        raise ValidationError('Message required')
 
     patient_context = get_patient_context(patient_id) or "No structured data."
     store_patient_vector(patient_id, patient_context)
@@ -227,28 +230,28 @@ def ask_text():
     User Question: "{question}"
     """
 
+    response = model.generate_content(system_prompt, safety_settings=safety_settings)
     try:
-        response = model.generate_content(system_prompt, safety_settings=safety_settings)
-        try:
-            reply_text = response.text
-        except ValueError:
-            reply_text = "عذراً، لا يمكنني الإجابة لأسباب أمنية."
+        reply_text = response.text
+    except ValueError:
+        reply_text = "عذراً، لا يمكنني الإجابة لأسباب أمنية."
 
-        return jsonify({"response": reply_text, "source": "Gemini RAG + DB"}), 200
-
-    except Exception as e:
-        print(f"Gemini Error: {e}")
-        return jsonify({"error": "AI Error"}), 500
+    return success_response(
+        data={"response": reply_text, "source": "Gemini RAG + DB"},
+        message='AI response generated',
+        status_code=200,
+    )
 
 
+@handle_errors('Voice processing failed')
 def ask_voice():
     payload = getattr(request, 'current_user_payload', None)
     if not payload or payload.get('role') != 'patient':
-        return jsonify({"error": "Access denied."}), 403
+        raise AppError('Access denied.', status_code=403)
     patient_id = payload.get('sub')
 
     if 'audio' not in request.files:
-        return jsonify({"error": "No audio"}), 400
+        raise ValidationError('No audio')
 
     audio_file = request.files['audio']
     unique_id = uuid.uuid4()
@@ -263,7 +266,7 @@ def ask_voice():
         user_text = speech_to_text(wav_path)
 
         if not user_text:
-            return jsonify({"error": "Could not understand audio"}), 400
+            raise ValidationError('Could not understand audio')
 
         patient_context = get_patient_context(patient_id) or "No data."
         store_patient_vector(patient_id, patient_context)
@@ -294,10 +297,7 @@ def ask_voice():
 
         if text_to_speech(ai_text, output_path):
             return send_file(output_path, mimetype="audio/mpeg", as_attachment=True, download_name="reply.mp3")
-        return jsonify({"error": "TTS Failed"}), 500
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        raise AppError('TTS Failed', status_code=500)
 
     finally:
         for path in [input_path, wav_path, output_path]:

@@ -4,8 +4,9 @@ import hashlib
 import hmac
 import jwt
 from typing import Set
-from flask import request, jsonify
+from flask import request
 from functools import wraps
+from app.utils.response import error_response
 
 DEFAULT_EXP_MINUTES = 60
 _blacklist: Set[str] = set()
@@ -103,7 +104,11 @@ def jwt_required():
         def wrapper(*args, **kwargs):
             token = _get_token_from_header()
             if not token:
-                return jsonify({'error': 'Missing Authorization Header'}), 401
+                return error_response(
+                    message='Missing Authorization Header',
+                    status_code=401,
+                    code='AUTH_ERROR',
+                )
             try:
                 payload = decode_token(token)
                 current_user = _load_current_user(payload)
@@ -132,7 +137,11 @@ def jwt_required():
                 request.current_user_payload = payload
                 request.current_user = current_user
             except JWTError as e:
-                return jsonify({'error': str(e)}), 401
+                return error_response(
+                    message=str(e),
+                    status_code=401,
+                    code='AUTH_ERROR',
+                )
             return f(*args, **kwargs)
         return wrapper
     return decorator

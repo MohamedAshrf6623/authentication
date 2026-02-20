@@ -1,4 +1,4 @@
-from flask import request, jsonify
+from flask import request
 from sqlalchemy import or_, func
 from uuid import uuid4
 import re
@@ -8,6 +8,8 @@ from app.models.patient import Patient
 from app.models.caregiver import CareGiver
 from app.models.doctor import Doctor
 from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_token, build_password_signature
+from app.utils.error_handler import handle_errors, AppError, ValidationError, AuthError, NotFoundError
+from app.utils.response import success_response
 
 
 def _patient_to_dict(patient: Patient):
@@ -123,23 +125,23 @@ def _register_patient(data: dict):
     required = ['name', 'email', 'password', 'doctor_id', 'care_giver_id']
     missing = _missing_fields(data, required)
     if missing:
-        return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
+        raise ValidationError(f'Missing required fields: {", ".join(missing)}', details={'fields': missing})
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
-        return jsonify({'error': 'Invalid email format'}), 400
+        raise ValidationError('Invalid email format')
 
     existing = Patient.query.filter(func.lower(Patient.email) == email).first()
     if existing:
-        return jsonify({'error': 'Email already registered'}), 409
+        raise AppError('Email already registered', status_code=409)
 
     doctor = Doctor.query.filter_by(doctor_id=data['doctor_id']).first()
     if not doctor:
-        return jsonify({'error': f'Doctor with id {data["doctor_id"]} does not exist'}), 400
+        raise ValidationError(f'Doctor with id {data["doctor_id"]} does not exist')
 
     caregiver = CareGiver.query.filter_by(care_giver_id=data['care_giver_id']).first()
     if not caregiver:
-        return jsonify({'error': f'CareGiver with id {data["care_giver_id"]} does not exist'}), 400
+        raise ValidationError(f'CareGiver with id {data["care_giver_id"]} does not exist')
 
     patient = Patient(
         patient_id=data.get('patient_id') or str(uuid4()),
@@ -161,22 +163,26 @@ def _register_patient(data: dict):
     db.session.commit()
 
     token = _issue_token(str(patient.patient_id), 'patient', patient.password)
-    return jsonify({'token': token, 'patient': _patient_to_dict(patient)}), 201
+    return success_response(
+        data={'token': token, 'patient': _patient_to_dict(patient)},
+        message='Patient registered successfully',
+        status_code=201,
+    )
 
 
 def _register_doctor(data: dict):
     required = ['name', 'email', 'password']
     missing = _missing_fields(data, required)
     if missing:
-        return jsonify({'error': f'Missing fields: {", ".join(missing)}'}), 400
+        raise ValidationError(f'Missing fields: {", ".join(missing)}')
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
-        return jsonify({'error': 'Invalid email format'}), 400
+        raise ValidationError('Invalid email format')
 
     existing = Doctor.query.filter(func.lower(Doctor.email) == email).first()
     if existing:
-        return jsonify({'error': 'Email already registered'}), 409
+        raise AppError('Email already registered', status_code=409)
 
     doctor = Doctor(
         doctor_id=data.get('doctor_id') or str(uuid4()),
@@ -194,22 +200,26 @@ def _register_doctor(data: dict):
     db.session.commit()
 
     token = _issue_token(str(doctor.doctor_id), 'doctor', doctor.password)
-    return jsonify({'token': token, 'doctor': _doctor_to_dict(doctor)}), 201
+    return success_response(
+        data={'token': token, 'doctor': _doctor_to_dict(doctor)},
+        message='Doctor registered successfully',
+        status_code=201,
+    )
 
 
 def _register_caregiver(data: dict):
     required = ['name', 'email', 'password']
     missing = _missing_fields(data, required)
     if missing:
-        return jsonify({'error': f'Missing fields: {", ".join(missing)}'}), 400
+        raise ValidationError(f'Missing fields: {", ".join(missing)}')
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
-        return jsonify({'error': 'Invalid email format'}), 400
+        raise ValidationError('Invalid email format')
 
     existing = CareGiver.query.filter(func.lower(CareGiver.email) == email).first()
     if existing:
-        return jsonify({'error': 'Email already registered'}), 409
+        raise AppError('Email already registered', status_code=409)
 
     caregiver = CareGiver(
         care_giver_id=data.get('care_giver_id') or str(uuid4()),
@@ -225,33 +235,42 @@ def _register_caregiver(data: dict):
     db.session.commit()
 
     token = _issue_token(str(caregiver.care_giver_id), 'caregiver', caregiver.password)
-    return jsonify({'token': token, 'caregiver': _caregiver_to_dict(caregiver)}), 201
+    return success_response(
+        data={'token': token, 'caregiver': _caregiver_to_dict(caregiver)},
+        message='Caregiver registered successfully',
+        status_code=201,
+    )
 
 
+@handle_errors('Register failed')
 def register():
     data = request.get_json() or {}
     return _register_patient(data)
 
 
+@handle_errors('Register patient failed')
 def register_patient():
     return _register_patient(request.get_json() or {})
 
 
+@handle_errors('Register doctor failed')
 def register_doctor():
     return _register_doctor(request.get_json() or {})
 
 
+@handle_errors('Register caregiver failed')
 def register_caregiver():
     return _register_caregiver(request.get_json() or {})
 
 
+@handle_errors('Login failed')
 def login():
     data = request.get_json() or {}
     role = (data.get('role') or '').strip().lower()
     identifier = (data.get('email') or data.get('username') or data.get('name') or '').strip()
     password = data.get('password')
     if not identifier or not password:
-        return jsonify({'error': 'email/username and password are required'}), 400
+        raise ValidationError('email/username and password are required')
 
     ident_lower = identifier.lower()
 
@@ -293,27 +312,40 @@ def login():
                     user_obj, user_role = c, 'caregiver'
 
     if not user_obj:
-        return jsonify({'error': 'invalid credentials'}), 401
+        raise AuthError('invalid credentials')
 
     if user_role == 'patient':
         token = _issue_token(str(user_obj.patient_id), user_role, user_obj.password)
-        return jsonify({'token': token, 'role': user_role, 'patient': _patient_to_dict(user_obj)}), 200
+        return success_response(
+            data={'token': token, 'role': user_role, 'patient': _patient_to_dict(user_obj)},
+            message='Login successful',
+            status_code=200,
+        )
     if user_role == 'doctor':
         token = _issue_token(str(user_obj.doctor_id), user_role, user_obj.password)
-        return jsonify({'token': token, 'role': user_role, 'doctor': _doctor_to_dict(user_obj)}), 200
+        return success_response(
+            data={'token': token, 'role': user_role, 'doctor': _doctor_to_dict(user_obj)},
+            message='Login successful',
+            status_code=200,
+        )
 
     token = _issue_token(str(user_obj.care_giver_id), user_role, user_obj.password)
-    return jsonify({'token': token, 'role': user_role, 'caregiver': _caregiver_to_dict(user_obj)}), 200
+    return success_response(
+        data={'token': token, 'role': user_role, 'caregiver': _caregiver_to_dict(user_obj)},
+        message='Login successful',
+        status_code=200,
+    )
 
 
+@handle_errors('Fetch profile failed')
 def me():
     token = _get_token_from_header()
     if not token:
-        return jsonify({'error': 'Missing Bearer token'}), 401
+        raise AuthError('Missing Bearer token')
     try:
         payload = decode_token(token)
     except JWTError as e:
-        return jsonify({'error': str(e)}), 401
+        raise AuthError(str(e)) from e
 
     role = payload.get('role')
     sub = payload.get('sub')
@@ -321,32 +353,33 @@ def me():
     if role == 'doctor':
         doctor = Doctor.query.filter_by(doctor_id=sub).first()
         if not doctor:
-            return jsonify({'error': 'Doctor not found'}), 404
-        return jsonify(_doctor_to_dict(doctor)), 200
+            raise NotFoundError('Doctor not found')
+        return success_response(data=_doctor_to_dict(doctor), message='Profile fetched', status_code=200)
 
     if role == 'caregiver':
         caregiver = CareGiver.query.filter_by(care_giver_id=sub).first()
         if not caregiver:
-            return jsonify({'error': 'CareGiver not found'}), 404
-        return jsonify(_caregiver_to_dict(caregiver)), 200
+            raise NotFoundError('CareGiver not found')
+        return success_response(data=_caregiver_to_dict(caregiver), message='Profile fetched', status_code=200)
 
     patient = Patient.query.filter_by(patient_id=sub).first()
     if not patient:
-        return jsonify({'error': 'Patient not found'}), 404
-    return jsonify(_patient_to_dict(patient)), 200
+        raise NotFoundError('Patient not found')
+    return success_response(data=_patient_to_dict(patient), message='Profile fetched', status_code=200)
 
 
+@handle_errors('Logout failed')
 def logout():
     token = _get_token_from_header()
     if not token:
-        return jsonify({'error': 'Missing Bearer token'}), 401
+        raise AuthError('Missing Bearer token')
     try:
         decode_token(token)
     except JWTError as e:
-        return jsonify({'error': str(e)}), 401
+        raise AuthError(str(e)) from e
 
     revoke_token(token)
-    return jsonify({'message': 'Logged out'}), 200
+    return success_response(message='Logged out', status_code=200)
 
 
 def _get_token_from_header():
