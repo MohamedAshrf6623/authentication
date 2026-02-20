@@ -122,10 +122,16 @@ def _validate_email(email: str):
 
 
 def _register_patient(data: dict):
-    required = ['name', 'email', 'password', 'doctor_id', 'care_giver_id']
+    required = ['name', 'email', 'password', 'confirm_password', 'doctor_id', 'care_giver_id']
     missing = _missing_fields(data, required)
     if missing:
         raise ValidationError(f'Missing required fields: {", ".join(missing)}', details={'fields': missing})
+
+    if data['password'] != data['confirm_password']:
+        raise ValidationError(
+            'Password and confirm_password do not match',
+            details={'fields': ['password', 'confirm_password']}
+        )
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
@@ -171,10 +177,16 @@ def _register_patient(data: dict):
 
 
 def _register_doctor(data: dict):
-    required = ['name', 'email', 'password']
+    required = ['name', 'email', 'password', 'confirm_password']
     missing = _missing_fields(data, required)
     if missing:
-        raise ValidationError(f'Missing fields: {", ".join(missing)}')
+        raise ValidationError(f'Missing fields: {", ".join(missing)}', details={'fields': missing})
+
+    if data['password'] != data['confirm_password']:
+        raise ValidationError(
+            'Password and confirm_password do not match',
+            details={'fields': ['password', 'confirm_password']}
+        )
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
@@ -208,10 +220,16 @@ def _register_doctor(data: dict):
 
 
 def _register_caregiver(data: dict):
-    required = ['name', 'email', 'password']
+    required = ['name', 'email', 'password', 'confirm_password']
     missing = _missing_fields(data, required)
     if missing:
-        raise ValidationError(f'Missing fields: {", ".join(missing)}')
+        raise ValidationError(f'Missing fields: {", ".join(missing)}', details={'fields': missing})
+
+    if data['password'] != data['confirm_password']:
+        raise ValidationError(
+            'Password and confirm_password do not match',
+            details={'fields': ['password', 'confirm_password']}
+        )
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
