@@ -62,10 +62,10 @@ def create_app():
         from . import models  # noqa: F401
 
     # Register blueprints
-    from .routes.auth import auth_bp
+    from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
     
-    from app.routes.chat import chat_bp
+    from app.routes.chat_routes import chat_bp
     app.register_blueprint(chat_bp, url_prefix='/chat')    
 
     return app

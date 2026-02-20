@@ -1,28 +1,25 @@
-from flask import Blueprint, request, jsonify
+from flask import request, jsonify
+from sqlalchemy import or_, func
+from uuid import uuid4
+import re
+
+from app import db
 from app.models.patient import Patient
 from app.models.caregiver import CareGiver
-from app.models.prescription import MPrescription
-from app.models.medicine import Medicine
 from app.models.doctor import Doctor
-from app import db
 from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_token, build_password_signature
-from sqlalchemy import or_, func
-import re
-from uuid import uuid4
 
-auth_bp = Blueprint('auth', __name__)
 
 def _patient_to_dict(patient: Patient):
     presc_list = []
     for pres in patient.prescriptions:
-        # Convert time object to string for JSON serialization
         schedule_time_str = pres.schedule_time.strftime('%H:%M:%S') if pres.schedule_time else None
-        
+
         presc_list.append({
             'medicine_id': pres.medicine_id,
             'medicine_name': pres.medicine.name if pres.medicine else pres.medicine_name,
             'schedule_time': schedule_time_str,
-            'alzhiemer_level': pres.alzhiemer_level,  # Note: Database has misspelling
+            'alzhiemer_level': pres.alzhiemer_level,
             'notes': pres.notes
         })
     return {
@@ -101,6 +98,7 @@ def _doctor_to_dict(doctor: Doctor):
         ]
     }
 
+
 def _issue_token(subject: str, role: str, password_hash: str | None = None):
     extra = None
     pwd_sig = build_password_signature(password_hash)
@@ -131,17 +129,14 @@ def _register_patient(data: dict):
     if not _validate_email(email):
         return jsonify({'error': 'Invalid email format'}), 400
 
-    # Check if patient email already exists
     existing = Patient.query.filter(func.lower(Patient.email) == email).first()
     if existing:
         return jsonify({'error': 'Email already registered'}), 409
 
-    # Verify doctor exists
     doctor = Doctor.query.filter_by(doctor_id=data['doctor_id']).first()
     if not doctor:
         return jsonify({'error': f'Doctor with id {data["doctor_id"]} does not exist'}), 400
 
-    # Verify caregiver exists
     caregiver = CareGiver.query.filter_by(care_giver_id=data['care_giver_id']).first()
     if not caregiver:
         return jsonify({'error': f'CareGiver with id {data["care_giver_id"]} does not exist'}), 400
@@ -156,8 +151,8 @@ def _register_patient(data: dict):
         chronic_disease=data.get('chronic_disease'),
         city=data.get('city'),
         address=data.get('address'),
-        age_category=data.get('age_category') or 'Unknown',  # Default value if not provided
-        hospital_address=data.get('hospital_address') or 'Not specified',  # Default value if not provided
+        age_category=data.get('age_category') or 'Unknown',
+        hospital_address=data.get('hospital_address') or 'Not specified',
         doctor_id=data['doctor_id'],
         care_giver_id=data['care_giver_id'],
     )
@@ -232,37 +227,32 @@ def _register_caregiver(data: dict):
     token = _issue_token(str(caregiver.care_giver_id), 'caregiver', caregiver.password)
     return jsonify({'token': token, 'caregiver': _caregiver_to_dict(caregiver)}), 201
 
-@auth_bp.route('/register', methods=['POST'])
+
 def register():
-    # Backward compatible patient signup
     data = request.get_json() or {}
     return _register_patient(data)
 
 
-@auth_bp.route('/register/patient', methods=['POST'])
 def register_patient():
     return _register_patient(request.get_json() or {})
 
 
-@auth_bp.route('/register/doctor', methods=['POST'])
 def register_doctor():
     return _register_doctor(request.get_json() or {})
 
 
-@auth_bp.route('/register/caregiver', methods=['POST'])
 def register_caregiver():
     return _register_caregiver(request.get_json() or {})
 
-@auth_bp.route('/login', methods=['POST'])
+
 def login():
     data = request.get_json() or {}
-    role = (data.get('role') or '').strip().lower()  # optional: 'patient', 'doctor', or 'caregiver'
+    role = (data.get('role') or '').strip().lower()
     identifier = (data.get('email') or data.get('username') or data.get('name') or '').strip()
     password = data.get('password')
     if not identifier or not password:
         return jsonify({'error': 'email/username and password are required'}), 400
 
-    # Normalize for case-insensitive email match
     ident_lower = identifier.lower()
 
     user_obj = None
@@ -290,7 +280,6 @@ def login():
         if candidate and candidate.verify_password(password):
             user_obj, user_role = candidate, 'caregiver'
     else:
-        # auto-detect: try patient first then doctor then caregiver
         p = _match_patient()
         if p and p.verify_password(password):
             user_obj, user_role = p, 'patient'
@@ -309,14 +298,14 @@ def login():
     if user_role == 'patient':
         token = _issue_token(str(user_obj.patient_id), user_role, user_obj.password)
         return jsonify({'token': token, 'role': user_role, 'patient': _patient_to_dict(user_obj)}), 200
-    elif user_role == 'doctor':
+    if user_role == 'doctor':
         token = _issue_token(str(user_obj.doctor_id), user_role, user_obj.password)
         return jsonify({'token': token, 'role': user_role, 'doctor': _doctor_to_dict(user_obj)}), 200
-    else:  # caregiver
-        token = _issue_token(str(user_obj.care_giver_id), user_role, user_obj.password)
-        return jsonify({'token': token, 'role': user_role, 'caregiver': _caregiver_to_dict(user_obj)}), 200
 
-@auth_bp.route('/me', methods=['GET'])
+    token = _issue_token(str(user_obj.care_giver_id), user_role, user_obj.password)
+    return jsonify({'token': token, 'role': user_role, 'caregiver': _caregiver_to_dict(user_obj)}), 200
+
+
 def me():
     token = _get_token_from_header()
     if not token:
@@ -325,36 +314,40 @@ def me():
         payload = decode_token(token)
     except JWTError as e:
         return jsonify({'error': str(e)}), 401
+
     role = payload.get('role')
     sub = payload.get('sub')
-    
+
     if role == 'doctor':
         doctor = Doctor.query.filter_by(doctor_id=sub).first()
         if not doctor:
             return jsonify({'error': 'Doctor not found'}), 404
         return jsonify(_doctor_to_dict(doctor)), 200
-    elif role == 'caregiver':
+
+    if role == 'caregiver':
         caregiver = CareGiver.query.filter_by(care_giver_id=sub).first()
         if not caregiver:
             return jsonify({'error': 'CareGiver not found'}), 404
         return jsonify(_caregiver_to_dict(caregiver)), 200
-    else:  # default patient
-        patient = Patient.query.filter_by(patient_id=sub).first()
-        if not patient:
-            return jsonify({'error': 'Patient not found'}), 404
-        return jsonify(_patient_to_dict(patient)), 200
 
-@auth_bp.route('/logout', methods=['POST'])
+    patient = Patient.query.filter_by(patient_id=sub).first()
+    if not patient:
+        return jsonify({'error': 'Patient not found'}), 404
+    return jsonify(_patient_to_dict(patient)), 200
+
+
 def logout():
     token = _get_token_from_header()
     if not token:
         return jsonify({'error': 'Missing Bearer token'}), 401
     try:
-        decode_token(token)  # validate before revoking
+        decode_token(token)
     except JWTError as e:
         return jsonify({'error': str(e)}), 401
+
     revoke_token(token)
     return jsonify({'message': 'Logged out'}), 200
+
 
 def _get_token_from_header():
     auth_header = request.headers.get('Authorization', '')
