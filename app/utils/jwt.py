@@ -133,7 +133,7 @@ def jwt_required():
                     if not hmac.compare_digest(token_password_sig, current_password_sig):
                         raise JWTError('Password changed after token was issued')
 
-                # تخزين البيانات في الـ request لاستخدامها لاحقاً
+                # Store data on the request object for later use
                 request.current_user_payload = payload
                 request.current_user = current_user
             except JWTError as e:

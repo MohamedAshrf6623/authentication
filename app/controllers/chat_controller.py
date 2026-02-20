@@ -1,4 +1,4 @@
-# --- 1. إصلاح مشكلة SQLite (ضروري جداً لمكتبة ChromaDB) ---
+# --- 1. SQLite compatibility fix (required for ChromaDB) ---
 try:
     __import__('pysqlite3')
     import sys
