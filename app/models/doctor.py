@@ -1,5 +1,6 @@
 from app import db
 import bcrypt
+from datetime import datetime
 
 class Doctor(db.Model):
     __tablename__ = 'Doctors'
@@ -12,6 +13,9 @@ class Doctor(db.Model):
     age = db.Column(db.Integer)
     email = db.Column(db.String(255))
     password = db.Column(db.String(500))  # hashed password (bcrypt is 60+ chars)
+    password_changed_at = db.Column(db.DateTime, nullable=True)
+    password_reset_token = db.Column(db.String(255), nullable=True)
+    password_reset_expires = db.Column(db.DateTime, nullable=True)
     phone = db.Column(db.String(50))
     city = db.Column(db.String(100))
     clinic_address = db.Column(db.String(255))
@@ -27,6 +31,7 @@ class Doctor(db.Model):
         # Hash password
         hashed = bcrypt.hashpw(raw_password, bcrypt.gensalt())
         self.password = hashed.decode('utf-8')
+        self.password_changed_at = datetime.utcnow()
 
     def verify_password(self, raw_password: str) -> bool:
         if not self.password:

@@ -7,6 +7,8 @@ from app.controllers.auth_controller import (
     login,
     me,
     logout,
+    forget_password,
+    reset_password,
 )
 
 auth_bp = Blueprint('auth', __name__)
@@ -45,3 +47,13 @@ def me_route():
 @auth_bp.route('/logout', methods=['POST'])
 def logout_route():
     return logout()
+
+
+@auth_bp.route('/forget_password', methods=['POST'])
+def forget_password_route():
+    return forget_password()
+
+
+@auth_bp.route('/reset_password', methods=['POST'])
+def reset_password_route():
+    return reset_password()

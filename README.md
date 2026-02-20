@@ -19,11 +19,17 @@ Edit `.env` based on the example:
 ```env
 DATABASE_URL=mssql+pyodbc://USERNAME:PASSWORD@SERVER_NAME/DB_NAME?driver=ODBC+Driver+17+for+SQL+Server
 SECRET_KEY=CHANGE_ME_TO_A_SECURE_VALUE
+SMTP_USER=your_gmail@gmail.com
+SMTP_PASSWORD=your_gmail_app_password
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+EMAIL_FROM=your_gmail@gmail.com
 ```
 Notes:
 - For a local instance use `(local)` or `localhost` or `localhost\\SQLEXPRESS`.
 - For Windows Integrated Authentication (Trusted Connection) use:
   `mssql+pyodbc://@SERVER_NAME/DB_NAME?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=yes`
+- For Gmail SMTP, use an App Password (not your account password) and enable 2-Step Verification.
 
 ## 4. Run the server
 ```powershell
@@ -70,7 +76,36 @@ Headers:
 `Authorization: Bearer <JWT>`
 Adds the token to an in-memory blacklist (for production consider Redis or database persistence).
 
-### 5.5 Token lifetime
+### 5.5 Forgot password
+`POST /auth/forget_password`
+Body:
+```json
+{
+  "email": "ahmed@example.com",
+  "role": "patient"
+}
+```
+Notes:
+- `role` is optional (`patient`, `doctor`, `caregiver`).
+- If the same email exists in multiple roles, `role` becomes required.
+
+### 5.6 Reset password
+`POST /auth/reset_password`
+Body:
+```json
+{
+  "token": "<token-from-email>",
+  "password": "newSecret123",
+  "confirm_password": "newSecret123"
+}
+```
+Behavior:
+- Checks token validity and expiry.
+- Updates password and `password_changed_at`.
+- Clears reset token fields.
+- Issues a fresh JWT.
+
+### 5.7 Token lifetime
 Set in `.env`:
 ```
 JWT_EXP_MINUTES=120

@@ -2,6 +2,9 @@ from flask import request
 from sqlalchemy import or_, func
 from uuid import uuid4
 import re
+import secrets
+import hashlib
+from datetime import datetime, timedelta
 
 from app import db
 from app.models.patient import Patient
@@ -10,6 +13,7 @@ from app.models.doctor import Doctor
 from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_token, build_password_signature
 from app.utils.error_handler import handle_errors, AppError, ValidationError, AuthError, NotFoundError
 from app.utils.response import success_response
+from app.utils.email import send_password_reset_email
 
 
 def _patient_to_dict(patient: Patient):
@@ -119,6 +123,70 @@ def _missing_fields(data: dict, required: list[str]):
 
 def _validate_email(email: str):
     return re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email)
+
+
+def _model_by_role(role: str):
+    role = (role or '').strip().lower()
+    if role == 'patient':
+        return Patient
+    if role == 'doctor':
+        return Doctor
+    if role == 'caregiver':
+        return CareGiver
+    return None
+
+
+def _subject_for_user(user_obj, role: str):
+    if role == 'patient':
+        return str(user_obj.patient_id)
+    if role == 'doctor':
+        return str(user_obj.doctor_id)
+    return str(user_obj.care_giver_id)
+
+
+def _public_user_payload(user_obj, role: str):
+    if role == 'patient':
+        return {'patient': _patient_to_dict(user_obj)}
+    if role == 'doctor':
+        return {'doctor': _doctor_to_dict(user_obj)}
+    return {'caregiver': _caregiver_to_dict(user_obj)}
+
+
+def _build_reset_url(raw_token: str):
+    base_url = (request.host_url or '').rstrip('/')
+    return f'{base_url}/auth/reset_password?token={raw_token}'
+
+
+def _generate_reset_token_pair():
+    raw_token = secrets.token_urlsafe(32)
+    hashed_token = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    return raw_token, hashed_token
+
+
+def _resolve_user_by_email(email: str, role: str | None):
+    if role:
+        model = _model_by_role(role)
+        if not model:
+            raise ValidationError('Invalid role. Allowed: patient, doctor, caregiver')
+        user_obj = model.query.filter(func.lower(model.email) == email).first()
+        return user_obj, role
+
+    matches = []
+    patient = Patient.query.filter(func.lower(Patient.email) == email).first()
+    if patient:
+        matches.append((patient, 'patient'))
+    doctor = Doctor.query.filter(func.lower(Doctor.email) == email).first()
+    if doctor:
+        matches.append((doctor, 'doctor'))
+    caregiver = CareGiver.query.filter(func.lower(CareGiver.email) == email).first()
+    if caregiver:
+        matches.append((caregiver, 'caregiver'))
+
+    if len(matches) > 1:
+        raise ValidationError('Email exists in multiple accounts; provide role (patient/doctor/caregiver)')
+    if len(matches) == 1:
+        return matches[0]
+    return None, None
 
 
 def _register_patient(data: dict):
@@ -398,6 +466,101 @@ def logout():
 
     revoke_token(token)
     return success_response(message='Logged out', status_code=200)
+
+
+@handle_errors('Forgot password failed')
+def forget_password():
+    data = request.get_json() or {}
+
+    email_raw = data.get('email')
+    role = (data.get('role') or '').strip().lower() or None
+    if not email_raw:
+        raise ValidationError('email is required')
+
+    email = _normalize_email(email_raw)
+    if not _validate_email(email):
+        raise ValidationError('Invalid email format')
+
+    user_obj, resolved_role = _resolve_user_by_email(email, role)
+    if not user_obj:
+        raise NotFoundError('There is no user with this email address')
+
+    raw_token, hashed_token = _generate_reset_token_pair()
+    user_obj.password_reset_token = hashed_token
+    user_obj.password_reset_expires = datetime.utcnow() + timedelta(minutes=10)
+    db.session.commit()
+
+    reset_url = _build_reset_url(raw_token)
+    send_password_reset_email(to_email=email, reset_url=reset_url)
+
+    return success_response(
+        message='Reset token sent to email',
+        data={'role': resolved_role},
+        status_code=200,
+    )
+
+
+@handle_errors('Reset password failed')
+def reset_password():
+    data = request.get_json() or {}
+
+    raw_token = (data.get('token') or request.args.get('token') or '').strip()
+    new_password = data.get('password')
+    confirm_password = data.get('confirm_password')
+
+    if not raw_token:
+        raise ValidationError('token is required')
+    if not new_password or not confirm_password:
+        raise ValidationError('password and confirm_password are required')
+    if new_password != confirm_password:
+        raise ValidationError('Password and confirm_password do not match')
+
+    hashed_token = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    now_utc = datetime.utcnow()
+
+    user_obj = (
+        Patient.query.filter(
+            Patient.password_reset_token == hashed_token,
+            Patient.password_reset_expires > now_utc,
+        ).first()
+    )
+    resolved_role = 'patient'
+
+    if not user_obj:
+        user_obj = (
+            Doctor.query.filter(
+                Doctor.password_reset_token == hashed_token,
+                Doctor.password_reset_expires > now_utc,
+            ).first()
+        )
+        resolved_role = 'doctor'
+
+    if not user_obj:
+        user_obj = (
+            CareGiver.query.filter(
+                CareGiver.password_reset_token == hashed_token,
+                CareGiver.password_reset_expires > now_utc,
+            ).first()
+        )
+        resolved_role = 'caregiver'
+
+    if not user_obj:
+        raise ValidationError('Token is invalid or has expired')
+
+    user_obj.set_password(new_password)
+    user_obj.password_reset_token = None
+    user_obj.password_reset_expires = None
+    db.session.commit()
+
+    token = _issue_token(_subject_for_user(user_obj, resolved_role), resolved_role, user_obj.password)
+    response_data = {'token': token, 'role': resolved_role}
+    response_data.update(_public_user_payload(user_obj, resolved_role))
+
+    return success_response(
+        message='Password reset successful',
+        data=response_data,
+        status_code=200,
+    )
 
 
 def _get_token_from_header():
