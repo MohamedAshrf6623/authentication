@@ -5,7 +5,6 @@ from app.controllers.auth_controller import (
     register_doctor,
     register_caregiver,
     login,
-    me,
     logout,
     forget_password,
     reset_password,
@@ -38,11 +37,6 @@ def register_caregiver_route():
 @auth_bp.route('/login', methods=['POST'])
 def login_route():
     return login()
-
-
-@auth_bp.route('/me', methods=['GET'])
-def me_route():
-    return me()
 
 
 @auth_bp.route('/logout', methods=['POST'])

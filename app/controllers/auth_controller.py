@@ -423,37 +423,6 @@ def login():
     )
 
 
-@handle_errors('Fetch profile failed')
-def me():
-    token = _get_token_from_header()
-    if not token:
-        raise AuthError('Missing Bearer token')
-    try:
-        payload = decode_token(token)
-    except JWTError as e:
-        raise AuthError(str(e)) from e
-
-    role = payload.get('role')
-    sub = payload.get('sub')
-
-    if role == 'doctor':
-        doctor = Doctor.query.filter_by(doctor_id=sub).first()
-        if not doctor:
-            raise NotFoundError('Doctor not found')
-        return success_response(data=_doctor_to_dict(doctor), message='Profile fetched', status_code=200)
-
-    if role == 'caregiver':
-        caregiver = CareGiver.query.filter_by(care_giver_id=sub).first()
-        if not caregiver:
-            raise NotFoundError('CareGiver not found')
-        return success_response(data=_caregiver_to_dict(caregiver), message='Profile fetched', status_code=200)
-
-    patient = Patient.query.filter_by(patient_id=sub).first()
-    if not patient:
-        raise NotFoundError('Patient not found')
-    return success_response(data=_patient_to_dict(patient), message='Profile fetched', status_code=200)
-
-
 @handle_errors('Logout failed')
 def logout():
     token = _get_token_from_header()
