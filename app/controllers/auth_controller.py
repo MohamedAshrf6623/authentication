@@ -483,7 +483,10 @@ def forget_password():
 
     user_obj, resolved_role = _resolve_user_by_email(email, role)
     if not user_obj:
-        raise NotFoundError('There is no user with this email address')
+        return success_response(
+            message='If your account exists, you will receive an email.',
+            status_code=200,
+        )
 
     raw_token, hashed_token = _generate_reset_token_pair()
     user_obj.password_reset_token = hashed_token
@@ -494,7 +497,7 @@ def forget_password():
     send_password_reset_email(to_email=email, reset_url=reset_url)
 
     return success_response(
-        message='Reset token sent to email',
+        message='If your account exists, you will receive an email.',
         data={'role': resolved_role},
         status_code=200,
     )
