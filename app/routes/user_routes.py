@@ -2,6 +2,7 @@ from flask import Blueprint
 from app.controllers.user_controller import (
     me,
     updateme,
+    deleteme,
 )
 
 user_bp = Blueprint('user', __name__)
@@ -15,3 +16,8 @@ def me_route():
 @user_bp.route('/updateme', methods=['PATCH', 'POST'])
 def updateme_route():
     return updateme()
+
+
+@user_bp.route('/deleteme', methods=['DELETE', 'POST'])
+def deleteme_route():
+    return deleteme()

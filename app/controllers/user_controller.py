@@ -5,7 +5,7 @@ from app import db
 from app.models.patient import Patient
 from app.models.caregiver import CareGiver
 from app.models.doctor import Doctor
-from app.utils.jwt import decode_token, JWTError
+from app.utils.jwt import decode_token, JWTError, revoke_token
 from app.utils.error_handler import handle_errors, AuthError, ValidationError, NotFoundError
 from app.utils.response import success_response
 
@@ -141,17 +141,23 @@ def me():
         doctor = Doctor.query.filter_by(doctor_id=sub).first()
         if not doctor:
             raise NotFoundError('Doctor not found')
+        if not doctor.active:
+            raise AuthError('Account is deactivated')
         return success_response(data=_doctor_to_dict(doctor), message='Profile fetched', status_code=200)
 
     if role == 'caregiver':
         caregiver = CareGiver.query.filter_by(care_giver_id=sub).first()
         if not caregiver:
             raise NotFoundError('CareGiver not found')
+        if not caregiver.active:
+            raise AuthError('Account is deactivated')
         return success_response(data=_caregiver_to_dict(caregiver), message='Profile fetched', status_code=200)
 
     patient = Patient.query.filter_by(patient_id=sub).first()
     if not patient:
         raise NotFoundError('Patient not found')
+    if not patient.active:
+        raise AuthError('Account is deactivated')
     return success_response(data=_patient_to_dict(patient), message='Profile fetched', status_code=200)
 
 
@@ -204,6 +210,9 @@ def updateme():
     if not user_obj:
         raise NotFoundError(not_found_message)
 
+    if not user_obj.active:
+        raise AuthError('Account is deactivated')
+
     # Filter to only allowed fields
     filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
 
@@ -219,5 +228,45 @@ def updateme():
     return success_response(
         message='Profile updated successfully',
         data=response_data,
+        status_code=200,
+    )
+
+
+@handle_errors('Delete profile failed')
+def deleteme():
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+
+    try:
+        payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = payload.get('role')
+    sub = payload.get('sub')
+    if role not in ('patient', 'doctor', 'caregiver'):
+        raise AuthError('Invalid token role')
+
+    if role == 'patient':
+        user_obj = Patient.query.filter_by(patient_id=sub).first()
+        not_found_message = 'Patient not found'
+    elif role == 'doctor':
+        user_obj = Doctor.query.filter_by(doctor_id=sub).first()
+        not_found_message = 'Doctor not found'
+    else:
+        user_obj = CareGiver.query.filter_by(care_giver_id=sub).first()
+        not_found_message = 'CareGiver not found'
+
+    if not user_obj:
+        raise NotFoundError(not_found_message)
+
+    user_obj.active = False
+    db.session.commit()
+    revoke_token(token)
+
+    return success_response(
+        message='Account deactivated successfully',
+        data={'role': role, 'active': user_obj.active},
         status_code=200,
     )

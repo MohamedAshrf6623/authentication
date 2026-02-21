@@ -400,6 +400,9 @@ def login():
     if not user_obj:
         raise AuthError('invalid credentials')
 
+    if hasattr(user_obj, 'active') and not user_obj.active:
+        raise AuthError('Account is deactivated')
+
     if user_role == 'patient':
         token = _issue_token(str(user_obj.patient_id), user_role, user_obj.password)
         return success_response(

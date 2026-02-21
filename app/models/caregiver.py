@@ -17,6 +17,7 @@ class CareGiver(db.Model):
     phone = db.Column(db.String(50))
     city = db.Column(db.String(100))
     address = db.Column(db.String(255))
+    active = db.Column(db.Boolean, nullable=False, default=True)
 
     patients = db.relationship('Patient', back_populates='care_giver')
 

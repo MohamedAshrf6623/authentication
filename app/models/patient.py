@@ -23,6 +23,7 @@ class Patient(db.Model):
     address = db.Column(db.String(255))
     age_category = db.Column(db.String(100))
     hospital_address = db.Column(db.String(255))
+    active = db.Column(db.Boolean, nullable=False, default=True)
 
     # Relationships
     doctor = db.relationship('Doctor', back_populates='patients')

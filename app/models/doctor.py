@@ -19,6 +19,7 @@ class Doctor(db.Model):
     phone = db.Column(db.String(50))
     city = db.Column(db.String(100))
     clinic_address = db.Column(db.String(255))
+    active = db.Column(db.Boolean, nullable=False, default=True)
 
     patients = db.relationship('Patient', back_populates='doctor')
 
