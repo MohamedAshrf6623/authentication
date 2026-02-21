@@ -23,6 +23,7 @@ from app.utils.error_handler import handle_errors, AppError, ValidationError
 from app.utils.response import success_response
 
 
+# --- Vector DB Initialization ---
 DB_PATH = "/home/ubuntu/mobile/authentication/vector_db"
 
 try:
@@ -41,7 +42,7 @@ except Exception as e:
     collection = None
     embedding_model = None
 
-
+# --- Gemini API Configuration ---
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -56,7 +57,9 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
 
-
+# ==========================================
+# ===          Memory Functions (RAG)    ===
+# ==========================================
 def embed_text(text: str):
     if not embedding_model:
         return []
@@ -96,7 +99,9 @@ def search_patient_vectors(patient_id: str, query: str, k: int = 3):
         print(f"Search Vector Error: {e}")
         return "Error retrieving memory."
 
-
+# ==========================================
+# ===       Data Retrieval Function      ===
+# ==========================================
 def get_patient_context(patient_id):
     patient = Patient.query.filter_by(patient_id=patient_id).first()
 
@@ -117,14 +122,22 @@ def get_patient_context(patient_id):
         doctor_name = patient.doctor.name
         doctor_phone = getattr(patient.doctor, 'phone', 'N/A')
 
-    caregiver_name = getattr(patient, 'caregiver_name', 'Not Assigned')
-    emergency_phone = getattr(patient, 'emergency_phone', 'N/A')
+    # --- Fetch Caregiver correctly from the database ---
+    care_name = "Not Assigned"
+    care_phone = "N/A"
+    care_rel = "Caregiver"
+    
+    if hasattr(patient, 'care_giver') and patient.care_giver:
+        care_name = patient.care_giver.name
+        care_phone = getattr(patient.care_giver, 'phone', 'N/A')
+        care_rel = getattr(patient.care_giver, 'relation', 'Relative')
 
     info += (
-        f"\n=== CONTACTS ===\n"
+        f"\n=== MEDICAL TEAM (CONTACTS) ===\n"
         f"Treating Doctor: {doctor_name} (Phone: {doctor_phone})\n"
-        f"Caregiver/Emergency: {caregiver_name} (Phone: {emergency_phone})\n"
+        f"Caregiver/Emergency: {care_name} ({care_rel}, Phone: {care_phone})\n"
     )
+    # ---------------------------------------------------
 
     if patient.prescriptions:
         info += "\n=== MEDICATION SCHEDULE ===\n"
@@ -165,7 +178,9 @@ def get_patient_context(patient_id):
 
     return info
 
-
+# ==========================================
+# ===            Audio Helpers           ===
+# ==========================================
 def speech_to_text(audio_file_path):
     recognizer = sr.Recognizer()
     try:
@@ -184,7 +199,9 @@ def text_to_speech(text, output_path):
     except Exception:
         return False
 
-
+# ==========================================
+# ===            Endpoints               ===
+# ==========================================
 @handle_errors('AI Error')
 def ask_text():
     payload = getattr(request, 'current_user_payload', None)
@@ -206,29 +223,31 @@ def ask_text():
     final_context = f"""
     Current Time: {current_time}
 
-    Structured Database Info (Doctor, Meds, Games):
+    Structured Database Info (Doctor, Meds, Games, Caregiver):
     {patient_context}
 
     Relevant Memory (Previous Chats):
     {vector_context}
     """
 
+    # --- Text Prompt customized for strict responses based on DB ---
     system_prompt = f"""
     You are a smart, kind, and comprehensive medical assistant for an Alzheimer's patient.
 
-    You have full access to the patient's records below.
-    Use ONLY this data. Do not hallucinate.
+    You have full access to the patient's private records below.
+    Use ONLY this data to answer. Do NOT hallucinate names or relations.
 
     {final_context}
 
     Instructions:
-    1. **Doctor/Contact:** If asked about doctor or help, check the "CONTACTS" section.
+    1. **Doctor & Caregiver:** If asked about the doctor, caregiver, or who to call, look EXCLUSIVELY at the "MEDICAL TEAM (CONTACTS)" section.
     2. **Medicines:** If asked about meds or time, check "MEDICATION SCHEDULE". Compare with "Current Time".
     3. **Games:** If asked about performance, check "GAME SCORES".
-    4. **Language:** Reply in the SAME language as the user (Arabic/English).
+    4. **Language:** Reply concisely and warmly in the SAME language as the user (Arabic/English).
 
     User Question: "{question}"
     """
+    # -------------------------------------------------------------
 
     response = model.generate_content(system_prompt, safety_settings=safety_settings)
     try:
@@ -280,14 +299,19 @@ def ask_voice():
         Memory: {vector_context}
         """
 
+        # --- Voice Prompt customized for strict responses based on DB ---
         system_prompt = f"""
-        You are a voice assistant.
+        You are a smart voice assistant for an Alzheimer's patient.
         Context: {final_context}
         User said: "{user_text}"
+        
         Instructions:
-        - If asked about Doctor, Games, or Meds, look at DB Data.
-        - Reply concisely in Arabic (Egyptian dialect preferred).
+        - If asked about Doctor or Caregiver, look at the "MEDICAL TEAM (CONTACTS)" in DB Data.
+        - If asked about Meds, check "MEDICATION SCHEDULE".
+        - Do not invent information. If it's not in the Context, say you don't know.
+        - Reply warmly and concisely in Arabic (Egyptian dialect preferred).
         """
+        # --------------------------------------------------------------
 
         response = model.generate_content(system_prompt, safety_settings=safety_settings)
         try:
