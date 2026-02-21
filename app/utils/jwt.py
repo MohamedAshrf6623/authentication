@@ -65,10 +65,11 @@ def _get_exp_minutes(overridden: int | None = None) -> int:
 
 def create_access_token(sub: str, role: str | None = None, extra: dict | None = None, expires_minutes: int | None = None):
     exp_minutes = _get_exp_minutes(expires_minutes)
+    now_utc = dt.datetime.now(dt.timezone.utc)
     payload = {
         'sub': sub,
-        'iat': int(dt.datetime.utcnow().timestamp()),
-        'exp': int((dt.datetime.utcnow() + dt.timedelta(minutes=exp_minutes)).timestamp()),
+        'iat': int(now_utc.timestamp()),
+        'exp': int((now_utc + dt.timedelta(minutes=exp_minutes)).timestamp()),
     }
     if role:
         payload['role'] = role

@@ -472,6 +472,7 @@ def logout():
 def forget_password():
     data = request.get_json() or {}
 
+    # 1) Get email (and optional role) from request body
     email_raw = data.get('email')
     role = (data.get('role') or '').strip().lower() or None
     if not email_raw:
@@ -481,6 +482,7 @@ def forget_password():
     if not _validate_email(email):
         raise ValidationError('Invalid email format')
 
+    # 2) Get user by email (and role if provided)
     user_obj, resolved_role = _resolve_user_by_email(email, role)
     if not user_obj:
         return success_response(
@@ -488,11 +490,13 @@ def forget_password():
             status_code=200,
         )
 
+    # 3) Generate reset token and store hashed token + expiry
     raw_token, hashed_token = _generate_reset_token_pair()
     user_obj.password_reset_token = hashed_token
     user_obj.password_reset_expires = datetime.utcnow() + timedelta(minutes=10)
     db.session.commit()
 
+    # 4) Send reset URL to user email
     reset_url = _build_reset_url(raw_token)
     send_password_reset_email(to_email=email, reset_url=reset_url)
 
@@ -507,6 +511,7 @@ def forget_password():
 def reset_password():
     data = request.get_json() or {}
 
+    # 1) Get token and new password data from body/query
     raw_token = (data.get('token') or request.args.get('token') or '').strip()
     new_password = data.get('password')
     confirm_password = data.get('confirm_password')
@@ -518,6 +523,7 @@ def reset_password():
     if new_password != confirm_password:
         raise ValidationError('Password and confirm_password do not match')
 
+    # 2) Hash token and find matching user with non-expired reset token
     hashed_token = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
     now_utc = datetime.utcnow()
 
@@ -550,11 +556,13 @@ def reset_password():
     if not user_obj:
         raise ValidationError('Token is invalid or has expired')
 
+    # 3) Set new password and clear reset token fields
     user_obj.set_password(new_password)
     user_obj.password_reset_token = None
     user_obj.password_reset_expires = None
     db.session.commit()
 
+    # 4) Log user in, send new JWT
     token = _issue_token(_subject_for_user(user_obj, resolved_role), resolved_role, user_obj.password)
     response_data = {'token': token, 'role': resolved_role}
     response_data.update(_public_user_payload(user_obj, resolved_role))
@@ -566,8 +574,78 @@ def reset_password():
     )
 
 
+@handle_errors('Update password failed')
+def update_my_password():
+    data = request.get_json() or {}
+
+    current_password = data.get('password_current') or data.get('current_password')
+    new_password = data.get('password') or data.get('new_password')
+    confirm_password = data.get('confirm_password')
+
+    if not current_password:
+        raise ValidationError('current_password is required')
+    if not new_password or not confirm_password:
+        raise ValidationError('password and confirm_password are required')
+    if new_password != confirm_password:
+        raise ValidationError('Password and confirm_password do not match')
+
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+
+    try:
+        payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = payload.get('role')
+    sub = payload.get('sub')
+    if role not in ('patient', 'doctor', 'caregiver'):
+        raise AuthError('Invalid token role')
+
+    # 1) Get user from collection
+    if role == 'patient':
+        user_obj = Patient.query.filter_by(patient_id=sub).first()
+        not_found_message = 'Patient not found'
+    elif role == 'doctor':
+        user_obj = Doctor.query.filter_by(doctor_id=sub).first()
+        not_found_message = 'Doctor not found'
+    else:
+        user_obj = CareGiver.query.filter_by(care_giver_id=sub).first()
+        not_found_message = 'CareGiver not found'
+
+    if not user_obj:
+        raise NotFoundError(not_found_message)
+
+    # 2) Check if POSTed current password is correct
+    if not user_obj.verify_password(current_password):
+        raise AuthError('Your current password is wrong.')
+
+    # 3) If so, update password
+    user_obj.set_password(new_password)
+    db.session.commit()
+
+    # 4) Log user in, send JWT
+    new_token = _issue_token(_subject_for_user(user_obj, role), role, user_obj.password)
+    response_data = {'token': new_token, 'role': role}
+    response_data.update(_public_user_payload(user_obj, role))
+
+    return success_response(
+        message='Password updated successfully',
+        data=response_data,
+        status_code=200,
+    )
+
+
 def _get_token_from_header():
     auth_header = request.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         return auth_header.split(' ', 1)[1]
+    data = request.get_json(silent=True) or {}
+    body_token = data.get('token') or data.get('access_token') or data.get('bearer_token')
+    if body_token:
+        token_str = str(body_token).strip()
+        if token_str.startswith('Bearer '):
+            return token_str.split(' ', 1)[1]
+        return token_str
     return None
