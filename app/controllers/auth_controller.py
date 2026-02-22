@@ -190,16 +190,10 @@ def _resolve_user_by_email(email: str, role: str | None):
 
 
 def _register_patient(data: dict):
-    required = ['name', 'email', 'password', 'confirm_password', 'doctor_id', 'care_giver_id']
+    required = ['name', 'email', 'password', 'doctor_id', 'care_giver_id']
     missing = _missing_fields(data, required)
     if missing:
         raise ValidationError(f'Missing required fields: {", ".join(missing)}', details={'fields': missing})
-
-    if data['password'] != data['confirm_password']:
-        raise ValidationError(
-            'Password and confirm_password do not match',
-            details={'fields': ['password', 'confirm_password']}
-        )
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
@@ -245,16 +239,10 @@ def _register_patient(data: dict):
 
 
 def _register_doctor(data: dict):
-    required = ['name', 'email', 'password', 'confirm_password']
+    required = ['name', 'email', 'password']
     missing = _missing_fields(data, required)
     if missing:
         raise ValidationError(f'Missing fields: {", ".join(missing)}', details={'fields': missing})
-
-    if data['password'] != data['confirm_password']:
-        raise ValidationError(
-            'Password and confirm_password do not match',
-            details={'fields': ['password', 'confirm_password']}
-        )
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
@@ -288,16 +276,10 @@ def _register_doctor(data: dict):
 
 
 def _register_caregiver(data: dict):
-    required = ['name', 'email', 'password', 'confirm_password']
+    required = ['name', 'email', 'password']
     missing = _missing_fields(data, required)
     if missing:
         raise ValidationError(f'Missing fields: {", ".join(missing)}', details={'fields': missing})
-
-    if data['password'] != data['confirm_password']:
-        raise ValidationError(
-            'Password and confirm_password do not match',
-            details={'fields': ['password', 'confirm_password']}
-        )
 
     email = _normalize_email(data['email'])
     if not _validate_email(email):
@@ -486,14 +468,11 @@ def reset_password():
     # 1) Get token and new password data from body/query
     raw_token = (data.get('token') or request.args.get('token') or '').strip()
     new_password = data.get('password')
-    confirm_password = data.get('confirm_password')
 
     if not raw_token:
         raise ValidationError('token is required')
-    if not new_password or not confirm_password:
-        raise ValidationError('password and confirm_password are required')
-    if new_password != confirm_password:
-        raise ValidationError('Password and confirm_password do not match')
+    if not new_password:
+        raise ValidationError('password is required')
 
     # 2) Hash token and find matching user with non-expired reset token
     hashed_token = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
