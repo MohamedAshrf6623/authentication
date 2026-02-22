@@ -21,6 +21,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from app.utils.error_handler import handle_errors, AppError, ValidationError
 from app.utils.response import success_response
+from app.utils.validation import validate_payload, ChatAskPayload
 
 
 # --- Vector DB Initialization ---
@@ -209,7 +210,7 @@ def ask_text():
         raise AppError('Access denied.', status_code=403)
 
     patient_id = payload.get('sub')
-    data = request.get_json() or {}
+    data = validate_payload(ChatAskPayload, request.get_json() or {})
     question = data.get('message')
     if not question:
         raise ValidationError('Message required')

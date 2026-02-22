@@ -1,5 +1,6 @@
 from functools import wraps
-from flask import current_app
+from flask import current_app, jsonify
+from pydantic import ValidationError as PydanticValidationError
 from app import db
 from app.utils.response import error_response
 
@@ -42,6 +43,9 @@ def handle_errors(message: str = 'Internal server error', status_code: int = 500
                     code=err.code,
                     details=err.details or None,
                 )
+            except PydanticValidationError as err:
+                db.session.rollback()
+                return jsonify(err.errors()), 422
             except Exception:
                 db.session.rollback()
                 current_app.logger.exception('Unhandled exception in %s', func.__name__)

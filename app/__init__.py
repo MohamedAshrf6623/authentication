@@ -1,11 +1,18 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_limiter.errors import RateLimitExceeded
+from flask_talisman import Talisman
 from dotenv import load_dotenv
 import os
 
+from app.utils.response import error_response
+
 # Global SQLAlchemy instance
 (db, migrate) = (SQLAlchemy(), None)
+limiter = Limiter(key_func=get_remote_address)
 
 def _build_mssql_uri():
     """Build a SQL Server connection string from discrete environment variables if DATABASE_URL not supplied.
@@ -48,14 +55,33 @@ def create_app():
     """Application factory for Flask app."""
     load_dotenv()  # Load environment variables from .env if present
     app = Flask(__name__)
+    default_rate_limit = os.getenv('RATE_LIMIT_PER_HOUR', '100 per hour')
 
     app.config['SQLALCHEMY_DATABASE_URI'] = _build_mssql_uri()
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
+    app.config['RATELIMIT_DEFAULT'] = [default_rate_limit]
+    app.config['RATELIMIT_STORAGE_URI'] = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
     db.init_app(app)
+    limiter.init_app(app)
+    Talisman(
+        app,
+        content_security_policy=None,
+        force_https=False,
+        strict_transport_security=False,
+        session_cookie_secure=False,
+    )
     global migrate
     migrate = Migrate(app, db)
+
+    @app.errorhandler(RateLimitExceeded)
+    def handle_rate_limit(_error):
+        return error_response(
+            message=f'Too many requests from this IP. Limit is {default_rate_limit}.',
+            status_code=429,
+            code='RATE_LIMIT_EXCEEDED',
+        )
 
     # Import models to ensure SQLAlchemy can resolve relationships
     with app.app_context():

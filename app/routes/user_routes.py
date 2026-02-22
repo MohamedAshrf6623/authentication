@@ -1,4 +1,5 @@
 from flask import Blueprint
+from app import limiter
 from app.controllers.user_controller import (
     me,
     updateme,

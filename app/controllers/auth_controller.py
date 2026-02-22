@@ -14,6 +14,16 @@ from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_to
 from app.utils.error_handler import handle_errors, AppError, ValidationError, AuthError, NotFoundError
 from app.utils.response import success_response
 from app.utils.email import send_password_reset_email
+from app.utils.validation import (
+    validate_payload,
+    RegisterPatientPayload,
+    RegisterDoctorPayload,
+    RegisterCaregiverPayload,
+    LoginPayload,
+    ForgetPasswordPayload,
+    ResetPasswordPayload,
+    UpdateMyPasswordPayload,
+)
 
 
 def _patient_to_dict(patient: Patient):
@@ -312,28 +322,31 @@ def _register_caregiver(data: dict):
 
 @handle_errors('Register failed')
 def register():
-    data = request.get_json() or {}
+    data = validate_payload(RegisterPatientPayload, request.get_json() or {})
     return _register_patient(data)
 
 
 @handle_errors('Register patient failed')
 def register_patient():
-    return _register_patient(request.get_json() or {})
+    data = validate_payload(RegisterPatientPayload, request.get_json() or {})
+    return _register_patient(data)
 
 
 @handle_errors('Register doctor failed')
 def register_doctor():
-    return _register_doctor(request.get_json() or {})
+    data = validate_payload(RegisterDoctorPayload, request.get_json() or {})
+    return _register_doctor(data)
 
 
 @handle_errors('Register caregiver failed')
 def register_caregiver():
-    return _register_caregiver(request.get_json() or {})
+    data = validate_payload(RegisterCaregiverPayload, request.get_json() or {})
+    return _register_caregiver(data)
 
 
 @handle_errors('Login failed')
 def login():
-    data = request.get_json() or {}
+    data = validate_payload(LoginPayload, request.get_json() or {})
     role = (data.get('role') or '').strip().lower()
     identifier = (data.get('email') or data.get('username') or data.get('name') or '').strip()
     password = data.get('password')
@@ -424,7 +437,7 @@ def logout():
 
 @handle_errors('Forgot password failed')
 def forget_password():
-    data = request.get_json() or {}
+    data = validate_payload(ForgetPasswordPayload, request.get_json() or {})
 
     # 1) Get email (and optional role) from request body
     email_raw = data.get('email')
@@ -463,7 +476,7 @@ def forget_password():
 
 @handle_errors('Reset password failed')
 def reset_password():
-    data = request.get_json() or {}
+    data = validate_payload(ResetPasswordPayload, request.get_json() or {})
 
     # 1) Get token and new password data from body/query
     raw_token = (data.get('token') or request.args.get('token') or '').strip()
@@ -527,7 +540,7 @@ def reset_password():
 
 @handle_errors('Update password failed')
 def update_my_password():
-    data = request.get_json() or {}
+    data = validate_payload(UpdateMyPasswordPayload, request.get_json() or {})
 
     current_password = data.get('password_current') or data.get('current_password')
     new_password = data.get('password') or data.get('new_password')

@@ -1,4 +1,5 @@
 from flask import Blueprint
+from app import limiter
 from app.utils.jwt import jwt_required
 from app.controllers.chat_controller import ask_text, ask_voice
 

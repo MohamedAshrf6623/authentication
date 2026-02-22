@@ -8,6 +8,7 @@ from app.models.doctor import Doctor
 from app.utils.jwt import decode_token, JWTError, revoke_token
 from app.utils.error_handler import handle_errors, AuthError, ValidationError, NotFoundError
 from app.utils.response import success_response
+from app.utils.validation import validate_payload, UpdateMePayload
 
 
 def _patient_to_dict(patient: Patient):
@@ -163,7 +164,7 @@ def me():
 
 @handle_errors('Update profile failed')
 def updateme():
-    data = request.get_json() or {}
+    data = validate_payload(UpdateMePayload, request.get_json() or {})
 
     # 1) Create error if user POSTs password data
     if data.get('password') or data.get('confirm_password'):
