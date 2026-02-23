@@ -164,7 +164,7 @@ def _public_user_payload(user_obj, role: str):
 
 def _build_reset_url(raw_token: str):
     base_url = (request.host_url or '').rstrip('/')
-    return f'{base_url}/auth/reset_password?token={raw_token}'
+    return f'{base_url}/auth/resetpassword?token={raw_token}'
 
 
 def _generate_reset_token_pair():
