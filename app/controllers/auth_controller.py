@@ -4,6 +4,7 @@ from uuid import uuid4
 import re
 import secrets
 import hashlib
+import os
 from datetime import datetime, timedelta
 
 from app import db
@@ -163,8 +164,17 @@ def _public_user_payload(user_obj, role: str):
 
 
 def _build_reset_url(raw_token: str):
-    base_url = (request.host_url or '').rstrip('/')
-    return f'{base_url}/auth/resetpassword?token={raw_token}'
+    template = (
+        os.getenv('MOBILE_RESET_PASSWORD_URL_TEMPLATE')
+        or os.getenv('RESET_PASSWORD_DEEP_LINK_TEMPLATE')
+        or 'alzaware://resetpassword?token={token}'
+    )
+
+    if '{token}' in template:
+        return template.format(token=raw_token)
+
+    separator = '&' if '?' in template else '?'
+    return f'{template}{separator}token={raw_token}'
 
 
 def _generate_reset_token_pair():
