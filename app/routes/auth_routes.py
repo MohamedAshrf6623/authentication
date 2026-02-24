@@ -1,5 +1,6 @@
-from flask import Blueprint
+from flask import Blueprint, request
 from app import limiter
+from app.utils.response import success_response
 from app.controllers.auth_controller import (
     register,
     register_patient,
@@ -56,9 +57,20 @@ def forget_password_route():
     return forget_password()
 
 
-@auth_bp.route('/resetpassword', methods=['POST'])
+@auth_bp.route('/resetpassword', methods=['GET', 'POST'])
 @limiter.limit('5 per minute; 15 per hour')
 def reset_password_route():
+    if request.method == 'GET':
+        token = (request.args.get('token') or '').strip()
+        return success_response(
+            message='Use POST on this endpoint to reset password',
+            data={
+                'endpoint': '/auth/resetpassword',
+                'required_fields': ['password', 'confirm_password', 'token'],
+                'token': token,
+            },
+            status_code=200,
+        )
     return reset_password()
 
 
