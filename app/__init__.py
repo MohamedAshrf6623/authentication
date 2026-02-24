@@ -7,12 +7,36 @@ from flask_limiter.errors import RateLimitExceeded
 from flask_talisman import Talisman
 from dotenv import load_dotenv
 import os
+import re
 
 from app.utils.response import error_response
 
 # Global SQLAlchemy instance
 (db, migrate) = (SQLAlchemy(), None)
 limiter = Limiter(key_func=get_remote_address)
+
+
+def _parse_rate_limits(raw_value: str | None):
+    """Normalize RATE_LIMIT env value into a list of limiter strings.
+
+    Accepts values like:
+      - "100 per hour"
+      - "100 per hour; 10 per minute"
+      - "['100 per hour']"
+    """
+    if not raw_value:
+        return ['100 per hour']
+
+    value = raw_value.strip()
+    if value.startswith('[') and value.endswith(']'):
+        value = value[1:-1].strip()
+
+    parts = [
+        part.strip().strip("'\"")
+        for part in re.split(r'[;,]', value)
+        if part.strip()
+    ]
+    return parts or ['100 per hour']
 
 def _build_mssql_uri():
     """Build a SQL Server connection string from discrete environment variables if DATABASE_URL not supplied.
@@ -55,12 +79,14 @@ def create_app():
     """Application factory for Flask app."""
     load_dotenv()  # Load environment variables from .env if present
     app = Flask(__name__)
-    default_rate_limit = os.getenv('RATE_LIMIT_PER_HOUR', '100 per hour')
+    default_rate_limits = _parse_rate_limits(
+        os.getenv('RATE_LIMIT_PER_HOUR') or os.getenv('RATELIMIT_DEFAULT')
+    )
 
     app.config['SQLALCHEMY_DATABASE_URI'] = _build_mssql_uri()
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
-    app.config['RATELIMIT_DEFAULT'] = [default_rate_limit]
+    app.config['RATELIMIT_DEFAULT'] = default_rate_limits
     app.config['RATELIMIT_STORAGE_URI'] = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
     db.init_app(app)
@@ -77,8 +103,9 @@ def create_app():
 
     @app.errorhandler(RateLimitExceeded)
     def handle_rate_limit(_error):
+        limits_text = ', '.join(default_rate_limits)
         return error_response(
-            message=f'Too many requests from this IP. Limit is {default_rate_limit}.',
+            message=f'Too many requests from this IP. Limit is {limits_text}.',
             status_code=429,
             code='RATE_LIMIT_EXCEEDED',
         )
