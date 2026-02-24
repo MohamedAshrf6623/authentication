@@ -5,7 +5,7 @@ from email.message import EmailMessage
 from app.utils.error_handler import AppError
 
 
-def send_password_reset_email(to_email: str, reset_url: str):
+def send_password_reset_email(to_email: str, reset_url: str, click_url: str | None = None):
     smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
     smtp_port = int(os.getenv('SMTP_PORT', '587'))
     smtp_user = os.getenv('SMTP_USER')
@@ -23,10 +23,29 @@ def send_password_reset_email(to_email: str, reset_url: str):
     msg['Subject'] = 'Your password reset token (valid for 10 min)'
     msg['From'] = from_email
     msg['To'] = to_email
+    button_url = click_url or reset_url
+
     msg.set_content(
-        'Forgot your password? '\
-        f'Submit a POST request with your new password, confirm_password, and token to: {reset_url}\n'\
-        "If you didn't forget your password, please ignore this email!"
+        'Forgot your password?\n\n'
+      f'Open this link to reset your password: {button_url}\n\n'
+      "If you didn't forget your password, please ignore this email.\n\n"
+      'AlzWare Team'
+    )
+
+    msg.add_alternative(
+        f"""
+        <html>
+          <body>
+            <p>Forgot your password?</p>
+            <p>
+              <a href=\"{button_url}\" style=\"display:inline-block;padding:10px 16px;background:#1a73e8;color:#ffffff;text-decoration:none;border-radius:6px;\">Reset Password</a>
+            </p>
+            <p>If you didn't forget your password, please ignore this email.</p>
+            <p>AlzWare Team</p>
+          </body>
+        </html>
+        """,
+        subtype='html',
     )
 
     try:

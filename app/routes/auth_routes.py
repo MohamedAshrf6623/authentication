@@ -10,6 +10,7 @@ from app.controllers.auth_controller import (
     logout,
     forget_password,
     reset_password,
+    open_reset_password_link,
     update_my_password,
 )
 
@@ -72,6 +73,12 @@ def reset_password_route():
             status_code=200,
         )
     return reset_password()
+
+
+@auth_bp.route('/resetpassword/open', methods=['GET'])
+@limiter.limit('10 per minute; 30 per hour')
+def open_reset_password_link_route():
+    return open_reset_password_link()
 
 
 @auth_bp.route('/updatemypassword', methods=['PATCH', 'POST'])

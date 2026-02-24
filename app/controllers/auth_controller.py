@@ -1,4 +1,4 @@
-from flask import request
+from flask import request, redirect
 from sqlalchemy import or_, func
 from uuid import uuid4
 import re
@@ -6,7 +6,6 @@ import secrets
 import hashlib
 import os
 from datetime import datetime, timedelta
-
 from app import db
 from app.models.patient import Patient
 from app.models.caregiver import CareGiver
@@ -175,6 +174,18 @@ def _build_reset_url(raw_token: str):
 
     separator = '&' if '?' in template else '?'
     return f'{template}{separator}token={raw_token}'
+
+
+def _build_reset_click_url(raw_token: str):
+    template = os.getenv('RESET_PASSWORD_CLICK_URL_TEMPLATE')
+    if template:
+        if '{token}' in template:
+            return template.format(token=raw_token)
+        separator = '&' if '?' in template else '?'
+        return f'{template}{separator}token={raw_token}'
+
+    base_url = (request.host_url or '').rstrip('/')
+    return f'{base_url}/auth/resetpassword/open?token={raw_token}'
 
 
 def _generate_reset_token_pair():
@@ -475,7 +486,8 @@ def forget_password():
 
     # 4) Send reset URL to user email
     reset_url = _build_reset_url(raw_token)
-    send_password_reset_email(to_email=email, reset_url=reset_url)
+    click_url = _build_reset_click_url(raw_token)
+    send_password_reset_email(to_email=email, reset_url=reset_url, click_url=click_url)
 
     return success_response(
         message='If your account exists, you will receive an email.',
@@ -546,6 +558,15 @@ def reset_password():
         data=response_data,
         status_code=200,
     )
+
+
+@handle_errors('Open reset password link failed')
+def open_reset_password_link():
+    raw_token = (request.args.get('token') or '').strip()
+    if not raw_token:
+        raise ValidationError('token is required')
+
+    return redirect(_build_reset_url(raw_token), code=302)
 
 
 @handle_errors('Update password failed')
