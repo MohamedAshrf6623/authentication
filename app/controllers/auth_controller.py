@@ -471,7 +471,7 @@ def forget_password():
         raise ValidationError('Invalid email format')
 
     # 2) Get user by email (and role if provided)
-    user_obj, resolved_role = _resolve_user_by_email(email, role)
+    user_obj, _resolved_role = _resolve_user_by_email(email, role)
     if not user_obj:
         return success_response(
             message='If your account exists, you will receive an email.',
@@ -491,7 +491,6 @@ def forget_password():
 
     return success_response(
         message='If your account exists, you will receive an email.',
-        data={'role': resolved_role},
         status_code=200,
     )
 
