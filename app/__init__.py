@@ -6,6 +6,8 @@ from flask_limiter.util import get_remote_address
 from flask_limiter.errors import RateLimitExceeded
 from flask_talisman import Talisman
 from dotenv import load_dotenv
+from limits.util import parse_many
+import ast
 import os
 import re
 
@@ -24,19 +26,54 @@ def _parse_rate_limits(raw_value: str | None):
       - "100 per hour; 10 per minute"
       - "['100 per hour']"
     """
-    if not raw_value:
+    if raw_value is None:
         return ['100 per hour']
 
-    value = raw_value.strip()
-    if value.startswith('[') and value.endswith(']'):
+    value = str(raw_value).strip()
+    if not value:
+        return ['100 per hour']
+
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         value = value[1:-1].strip()
 
-    parts = [
-        part.strip().strip("'\"")
-        for part in re.split(r'[;,]', value)
-        if part.strip()
-    ]
-    return parts or ['100 per hour']
+    candidates: list[str] = []
+
+    if value.startswith('[') and value.endswith(']'):
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, (list, tuple, set)):
+                candidates = [str(item).strip() for item in parsed if str(item).strip()]
+        except Exception:
+            value = value[1:-1].strip()
+
+    if not candidates:
+        candidates = [
+            part.strip().strip("'\"")
+            for part in re.split(r'[;,\n]', value)
+            if part.strip()
+        ]
+
+    valid_limits: list[str] = []
+    for item in candidates:
+        try:
+            parse_many(item)
+            valid_limits.append(item)
+        except Exception:
+            continue
+
+    return valid_limits or ['100 per hour']
+
+
+def _load_default_rate_limits():
+    ratelimit_default = _parse_rate_limits(os.getenv('RATELIMIT_DEFAULT'))
+    rate_limit_per_hour = _parse_rate_limits(os.getenv('RATE_LIMIT_PER_HOUR'))
+
+    merged: list[str] = []
+    for item in ratelimit_default + rate_limit_per_hour:
+        if item not in merged:
+            merged.append(item)
+
+    return merged or ['100 per hour']
 
 def _build_mssql_uri():
     """Build a SQL Server connection string from discrete environment variables if DATABASE_URL not supplied.
@@ -79,9 +116,7 @@ def create_app():
     """Application factory for Flask app."""
     load_dotenv()  # Load environment variables from .env if present
     app = Flask(__name__)
-    default_rate_limits = _parse_rate_limits(
-        os.getenv('RATE_LIMIT_PER_HOUR') or os.getenv('RATELIMIT_DEFAULT')
-    )
+    default_rate_limits = _load_default_rate_limits()
 
     app.config['SQLALCHEMY_DATABASE_URI'] = _build_mssql_uri()
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
