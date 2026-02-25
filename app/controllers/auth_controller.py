@@ -48,6 +48,7 @@ def _patient_to_dict(patient: Patient):
         'city': patient.city,
         'address': patient.address,
         'age_category': patient.age_category,
+        'chronic_disease' : patient.chronic_disease,
         'hospital_address': patient.hospital_address,
         'doctor': (
             {
