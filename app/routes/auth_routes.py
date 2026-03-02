@@ -18,48 +18,49 @@ auth_bp = Blueprint('auth', __name__)
 
 
 @auth_bp.route('/register', methods=['POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def register_route():
     return register()
 
 
 @auth_bp.route('/register/patient', methods=['POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def register_patient_route():
     return register_patient()
 
 
 @auth_bp.route('/register/doctor', methods=['POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def register_doctor_route():
     return register_doctor()
 
 
 @auth_bp.route('/register/caregiver', methods=['POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def register_caregiver_route():
     return register_caregiver()
 
 
 @auth_bp.route('/login', methods=['POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def login_route():
     return login()
 
 
 @auth_bp.route('/logout', methods=['POST'])
+@limiter.limit('100 per minute')
 def logout_route():
     return logout()
 
 
 @auth_bp.route('/forgetpassword', methods=['POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def forget_password_route():
     return forget_password()
 
 
 @auth_bp.route('/resetpassword', methods=['GET', 'POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def reset_password_route():
     if request.method == 'GET':
         token = (request.args.get('token') or '').strip()
@@ -76,12 +77,12 @@ def reset_password_route():
 
 
 @auth_bp.route('/resetpassword/open', methods=['GET'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def open_reset_password_link_route():
     return open_reset_password_link()
 
 
 @auth_bp.route('/updatemypassword', methods=['PATCH', 'POST'])
-@limiter.limit('15 per minute')
+@limiter.limit('100 per minute')
 def update_my_password_route():
     return update_my_password()

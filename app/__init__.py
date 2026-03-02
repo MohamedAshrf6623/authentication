@@ -16,6 +16,7 @@ from app.utils.response import error_response
 # Global SQLAlchemy instance
 (db, migrate) = (SQLAlchemy(), None)
 limiter = Limiter(key_func=get_remote_address)
+DEFAULT_RATE_LIMIT = '100 per minute'
 
 
 def _parse_rate_limits(raw_value: str | None):
@@ -27,11 +28,11 @@ def _parse_rate_limits(raw_value: str | None):
       - "['100 per hour']"
     """
     if raw_value is None:
-        return ['100 per hour']
+        return [DEFAULT_RATE_LIMIT]
 
     value = str(raw_value).strip()
     if not value:
-        return ['100 per hour']
+        return [DEFAULT_RATE_LIMIT]
 
     if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         value = value[1:-1].strip()
@@ -55,13 +56,35 @@ def _parse_rate_limits(raw_value: str | None):
 
     valid_limits: list[str] = []
     for item in candidates:
+        cleaned = item.strip()
+        if (cleaned.startswith('[') and cleaned.endswith(']')) or (cleaned.startswith('(') and cleaned.endswith(')')):
+            try:
+                nested = ast.literal_eval(cleaned)
+                if isinstance(nested, (list, tuple, set)):
+                    for nested_item in nested:
+                        nested_text = str(nested_item).strip().strip("'\"")
+                        if not nested_text:
+                            continue
+                        try:
+                            parse_many(nested_text)
+                            valid_limits.append(nested_text)
+                        except Exception:
+                            continue
+                    continue
+            except Exception:
+                pass
         try:
-            parse_many(item)
-            valid_limits.append(item)
+            parse_many(cleaned)
+            valid_limits.append(cleaned)
         except Exception:
             continue
 
-    return valid_limits or ['100 per hour']
+    deduped: list[str] = []
+    for limit in valid_limits:
+        if limit not in deduped:
+            deduped.append(limit)
+
+    return deduped or [DEFAULT_RATE_LIMIT]
 
 
 def _load_default_rate_limits():
@@ -73,7 +96,7 @@ def _load_default_rate_limits():
         if item not in merged:
             merged.append(item)
 
-    return merged or ['100 per hour']
+    return merged or [DEFAULT_RATE_LIMIT]
 
 def _build_mssql_uri():
     """Build a SQL Server connection string from discrete environment variables if DATABASE_URL not supplied.

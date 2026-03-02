@@ -19,7 +19,7 @@ Edit `.env` based on the example:
 ```env
 DATABASE_URL=mssql+pyodbc://USERNAME:PASSWORD@SERVER_NAME/DB_NAME?driver=ODBC+Driver+17+for+SQL+Server
 SECRET_KEY=CHANGE_ME_TO_A_SECURE_VALUE
-RATE_LIMIT_PER_HOUR=100 per hour
+RATE_LIMIT_PER_HOUR=100 per minute
 RATELIMIT_STORAGE_URI=memory://
 SMTP_USER=your_gmail@gmail.com
 SMTP_PASSWORD=your_gmail_app_password
@@ -32,7 +32,7 @@ Notes:
 - For Windows Integrated Authentication (Trusted Connection) use:
   `mssql+pyodbc://@SERVER_NAME/DB_NAME?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=yes`
 - For Gmail SMTP, use an App Password (not your account password) and enable 2-Step Verification.
-- `RATE_LIMIT_PER_HOUR` applies globally per IP address (default: `100 per hour`).
+- `RATE_LIMIT_PER_HOUR` (or `RATELIMIT_DEFAULT`) applies globally per IP address (default: `100 per minute`).
 - `RATELIMIT_STORAGE_URI` controls limiter storage (default: `memory://`).
 
 ## 4. Run the server
@@ -45,14 +45,15 @@ Server will listen on: http://127.0.0.1:5000
 The following limits are currently applied on routes:
 
 ### 5.1 Auth endpoints
-- `POST /auth/login` → `5 per minute; 25 per hour`
-- `POST /auth/register` → `3 per minute; 15 per hour`
-- `POST /auth/register/patient` → `3 per minute; 15 per hour`
-- `POST /auth/register/doctor` → `3 per minute; 15 per hour`
-- `POST /auth/register/caregiver` → `3 per minute; 15 per hour`
-- `POST /auth/forgetpassword` → `2 per minute; 8 per hour`
-- `POST /auth/resetpassword` → `5 per minute; 15 per hour`
-- `PATCH/POST /auth/updatemypassword` → `5 per minute; 20 per hour`
+- `POST /auth/login` → `100 per minute`
+- `POST /auth/register` → `100 per minute`
+- `POST /auth/register/patient` → `100 per minute`
+- `POST /auth/register/doctor` → `100 per minute`
+- `POST /auth/register/caregiver` → `100 per minute`
+- `POST /auth/forgetpassword` → `100 per minute`
+- `POST/GET /auth/resetpassword` → `100 per minute`
+- `PATCH/POST /auth/updatemypassword` → `100 per minute`
+- `POST /auth/logout` → `100 per minute`
 
 ## 6. Auth Endpoints (JWT)
 Access token is issued on registration or login. Expiry can be configured using `JWT_EXP_MINUTES` in `.env` (default 60 minutes).
@@ -178,7 +179,7 @@ The following improvements were added during this setup:
 - Added `Flask-Limiter`, `Flask-Talisman`, `Flask-SQLAlchemy`, and `Pydantic`.
 
 ### 11.2 Rate limiting
-- Global default limit per IP via `RATE_LIMIT_PER_HOUR`.
+- Global default limit per IP via `RATE_LIMIT_PER_HOUR` / `RATELIMIT_DEFAULT`.
 - Per-route limits for auth endpoints (see section 5).
 - Rate limit errors return JSON with status `429` and code `RATE_LIMIT_EXCEEDED`.
 
