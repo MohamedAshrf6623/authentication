@@ -54,6 +54,24 @@ def _parse_rate_limits(raw_value: str | None):
             if part.strip()
         ]
 
+    if not candidates:
+        candidates = []
+
+    recovered_candidates: list[str] = []
+    for item in candidates:
+        cleaned = str(item).strip()
+        if not cleaned:
+            continue
+
+        recovered = re.findall(r"\d+\s+per\s+[a-zA-Z]+", cleaned)
+        if recovered:
+            recovered_candidates.extend([entry.strip() for entry in recovered if entry.strip()])
+            continue
+
+        recovered_candidates.append(cleaned)
+
+    candidates = recovered_candidates
+
     valid_limits: list[str] = []
     for item in candidates:
         cleaned = item.strip()
@@ -140,11 +158,12 @@ def create_app():
     load_dotenv()  # Load environment variables from .env if present
     app = Flask(__name__)
     default_rate_limits = _load_default_rate_limits()
+    default_rate_limits_config = '; '.join(default_rate_limits)
 
     app.config['SQLALCHEMY_DATABASE_URI'] = _build_mssql_uri()
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
-    app.config['RATELIMIT_DEFAULT'] = default_rate_limits
+    app.config['RATELIMIT_DEFAULT'] = default_rate_limits_config
     app.config['RATELIMIT_STORAGE_URI'] = os.getenv('RATELIMIT_STORAGE_URI', 'memory://')
 
     db.init_app(app)
