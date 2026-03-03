@@ -111,6 +111,7 @@ class UpdateMePayload(BaseModel):
     age: int | None = None
     gender: str | None = None
     phone: str | None = None
+    chronic_disease: str | None = None
     city: str | None = None
     address: str | None = None
     hospital_address: str | None = None

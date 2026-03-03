@@ -30,6 +30,7 @@ def _patient_to_dict(patient: Patient):
         'age': patient.age,
         'gender': patient.gender,
         'phone': patient.phone,
+        'chronic_disease': patient.chronic_disease,
         'city': patient.city,
         'address': patient.address,
         'age_category': patient.age_category,
@@ -196,7 +197,7 @@ def updateme():
 
     # 2) Filtered out unwanted fields names that are not allowed to be updated
     if role == 'patient':
-        allowed_fields = ['name', 'email', 'age', 'gender', 'phone', 'city', 'address', 'hospital_address', 'age_category']
+        allowed_fields = ['name', 'email', 'age', 'gender', 'phone', 'chronic_disease', 'city', 'address', 'hospital_address', 'age_category']
         user_obj = Patient.query.filter_by(patient_id=sub).first()
         not_found_message = 'Patient not found'
     elif role == 'doctor':
@@ -214,13 +215,31 @@ def updateme():
     if not user_obj.active:
         raise AuthError('Account is deactivated')
 
-    # Filter to only allowed fields
-    filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
+    # Partial update only: keep existing DB values unless a non-null value is provided
+    filtered_data = {
+        key: value
+        for key, value in data.items()
+        if key in allowed_fields and value is not None
+    }
+
+    if not filtered_data:
+        raise ValidationError(
+            'No valid fields provided for update.',
+            details={'allowed_fields': allowed_fields}
+        )
 
     # 3) Update user document
     for key, value in filtered_data.items():
         setattr(user_obj, key, value)
     db.session.commit()
+
+    # Reload from DB to guarantee response reflects persisted values
+    if role == 'patient':
+        user_obj = Patient.query.filter_by(patient_id=sub).first()
+    elif role == 'doctor':
+        user_obj = Doctor.query.filter_by(doctor_id=sub).first()
+    else:
+        user_obj = CareGiver.query.filter_by(care_giver_id=sub).first()
 
     # Return updated user info
     response_data = {'role': role}
