@@ -233,14 +233,6 @@ def updateme():
         setattr(user_obj, key, value)
     db.session.commit()
 
-    # Reload from DB to guarantee response reflects persisted values
-    if role == 'patient':
-        user_obj = Patient.query.filter_by(patient_id=sub).first()
-    elif role == 'doctor':
-        user_obj = Doctor.query.filter_by(doctor_id=sub).first()
-    else:
-        user_obj = CareGiver.query.filter_by(care_giver_id=sub).first()
-
     # Return updated user info
     response_data = {'role': role}
     response_data.update(_public_user_payload(user_obj, role))
