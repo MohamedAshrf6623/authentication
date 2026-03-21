@@ -201,4 +201,7 @@ def create_app():
     from app.routes.chat_routes import chat_bp
     app.register_blueprint(chat_bp, url_prefix='/chat')    
 
+    from app.routes.gps_routes import gps_bp
+    app.register_blueprint(gps_bp, url_prefix='/api')
+
     return app

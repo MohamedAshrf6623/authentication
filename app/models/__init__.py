@@ -11,6 +11,7 @@ from .medicine import Medicine
 from .game import Game
 from .patient import Patient
 from .prescription import MPrescription
+from .location import Location
 
 __all__ = [
     'db',
@@ -20,4 +21,5 @@ __all__ = [
     'Game',
     'Patient',
     'MPrescription',
+    'Location',
 ]
