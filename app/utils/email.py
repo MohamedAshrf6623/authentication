@@ -5,7 +5,7 @@ from email.message import EmailMessage
 from app.utils.error_handler import AppError
 
 
-def send_password_reset_email(to_email: str, reset_url: str, click_url: str | None = None):
+def send_password_reset_email(to_email: str, reset_url: str, click_url: str | None = None) -> None:
     smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
     smtp_port = int(os.getenv('SMTP_PORT', '587'))
     smtp_user = os.getenv('SMTP_USER')
