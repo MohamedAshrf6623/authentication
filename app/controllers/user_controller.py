@@ -1,14 +1,17 @@
 from flask import request
 from sqlalchemy import func
+from datetime import datetime
 
 from app import db
 from app.models.patient import Patient
 from app.models.caregiver import CareGiver
 from app.models.doctor import Doctor
+from app.models.medicine import Medicine
+from app.models.prescription import MPrescription
 from app.utils.jwt import decode_token, JWTError, revoke_token
 from app.utils.error_handler import handle_errors, AuthError, ValidationError, NotFoundError
 from app.utils.response import success_response
-from app.utils.validation import validate_payload, UpdateMePayload
+from app.utils.validation import validate_payload, UpdateMePayload, AddPrescriptionPayload
 
 
 def _patient_to_dict(patient: Patient):
@@ -121,6 +124,20 @@ def _get_token_from_header():
             return token_str.split(' ', 1)[1]
         return token_str
     return None
+
+
+def _parse_schedule_time(schedule_time_value: str):
+    value = str(schedule_time_value or '').strip()
+    if not value:
+        raise ValidationError('schedule_time is required in HH:MM or HH:MM:SS format')
+
+    for fmt in ('%H:%M:%S', '%H:%M'):
+        try:
+            return datetime.strptime(value, fmt).time()
+        except ValueError:
+            continue
+
+    raise ValidationError('Invalid schedule_time format. Use HH:MM or HH:MM:SS')
 
 
 @handle_errors('Fetch profile failed')
@@ -280,5 +297,179 @@ def deleteme():
     return success_response(
         message='Account deactivated successfully',
         data={'role': role, 'active': user_obj.active},
+        status_code=200,
+    )
+
+
+@handle_errors('Add prescription failed')
+def add_prescription():
+    payload = validate_payload(AddPrescriptionPayload, request.get_json() or {})
+
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+
+    try:
+        token_payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = token_payload.get('role')
+    doctor_id = token_payload.get('sub')
+    if role != 'doctor':
+        raise AuthError('Only doctors can add prescriptions')
+
+    doctor = Doctor.query.filter_by(doctor_id=doctor_id).first()
+    if not doctor:
+        raise NotFoundError('Doctor not found')
+    if not doctor.active:
+        raise AuthError('Account is deactivated')
+
+    patient = Patient.query.filter_by(patient_id=payload['patient_id']).first()
+    if not patient:
+        raise NotFoundError('Patient not found')
+    if not patient.active:
+        raise ValidationError('Patient account is deactivated')
+    if patient.doctor_id != doctor_id:
+        raise AuthError('You can only add prescriptions for your own patients')
+
+    medicine = Medicine.query.filter_by(medicine_id=payload['medicine_id']).first()
+    if not medicine:
+        raise NotFoundError('Medicine not found')
+
+    schedule_time = _parse_schedule_time(payload['schedule_time'])
+
+    existing = MPrescription.query.filter_by(
+        patient_id=payload['patient_id'],
+        medicine_id=payload['medicine_id'],
+    ).first()
+
+    if existing:
+        existing.medicine_name = medicine.name
+        existing.schedule_time = schedule_time
+        existing.alzhiemer_level = payload.get('alzhiemer_level')
+        existing.notes = payload.get('notes')
+        message = 'Prescription updated successfully'
+        prescription_obj = existing
+    else:
+        prescription_obj = MPrescription(
+            patient_id=payload['patient_id'],
+            medicine_id=payload['medicine_id'],
+            medicine_name=medicine.name,
+            schedule_time=schedule_time,
+            alzhiemer_level=payload.get('alzhiemer_level'),
+            notes=payload.get('notes'),
+        )
+        db.session.add(prescription_obj)
+        message = 'Prescription added successfully'
+
+    db.session.commit()
+
+    return success_response(
+        message=message,
+        data={
+            'patient_id': prescription_obj.patient_id,
+            'medicine_id': prescription_obj.medicine_id,
+            'medicine_name': prescription_obj.medicine_name,
+            'schedule_time': prescription_obj.schedule_time.strftime('%H:%M:%S') if prescription_obj.schedule_time else None,
+            'alzhiemer_level': prescription_obj.alzhiemer_level,
+            'notes': prescription_obj.notes,
+        },
+        status_code=201 if message == 'Prescription added successfully' else 200,
+    )
+
+
+@handle_errors('Fetch prescriptions failed')
+def my_prescriptions():
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+
+    try:
+        token_payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = token_payload.get('role')
+    patient_id = token_payload.get('sub')
+
+    if role != 'patient':
+        raise AuthError('Only patients can access this endpoint')
+
+    patient = Patient.query.filter_by(patient_id=patient_id).first()
+    if not patient:
+        raise NotFoundError('Patient not found')
+    if not patient.active:
+        raise AuthError('Account is deactivated')
+
+    prescriptions = []
+    for pres in patient.prescriptions:
+        prescriptions.append({
+            'patient_id': pres.patient_id,
+            'medicine_id': pres.medicine_id,
+            'medicine_name': pres.medicine.name if pres.medicine else pres.medicine_name,
+            'schedule_time': pres.schedule_time.strftime('%H:%M:%S') if pres.schedule_time else None,
+            'alzhiemer_level': pres.alzhiemer_level,
+            'notes': pres.notes,
+        })
+
+    return success_response(
+        message='Prescriptions fetched successfully',
+        data={
+            'patient_id': patient.patient_id,
+            'prescriptions': prescriptions,
+        },
+        status_code=200,
+    )
+
+
+@handle_errors('Fetch doctor patients failed')
+def my_patients():
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+
+    try:
+        token_payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = token_payload.get('role')
+    doctor_id = token_payload.get('sub')
+
+    if role != 'doctor':
+        raise AuthError('Only doctors can access this endpoint')
+
+    doctor = Doctor.query.filter_by(doctor_id=doctor_id).first()
+    if not doctor:
+        raise NotFoundError('Doctor not found')
+    if not doctor.active:
+        raise AuthError('Account is deactivated')
+
+    patients = []
+    for patient in doctor.patients:
+        if not patient.active:
+            continue
+        patients.append({
+            'patient_id': patient.patient_id,
+            'name': patient.name,
+            'age': patient.age,
+            'gender': patient.gender,
+            'email': patient.email,
+            'phone': patient.phone,
+            'chronic_disease': patient.chronic_disease,
+            'city': patient.city,
+            'address': patient.address,
+            'age_category': patient.age_category,
+            'hospital_address': patient.hospital_address,
+        })
+
+    return success_response(
+        message='Doctor patients fetched successfully',
+        data={
+            'doctor_id': doctor.doctor_id,
+            'patients_count': len(patients),
+            'patients': patients,
+        },
         status_code=200,
     )

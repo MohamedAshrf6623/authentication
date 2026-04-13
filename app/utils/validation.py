@@ -125,3 +125,13 @@ class ChatAskPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     message: str
+
+
+class AddPrescriptionPayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    patient_id: str
+    medicine_id: int
+    schedule_time: str
+    alzhiemer_level: str | None = None
+    notes: str | None = None
