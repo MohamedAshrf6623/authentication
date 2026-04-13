@@ -3,13 +3,12 @@ import datetime as dt
 import hashlib
 import hmac
 import jwt
-from typing import Set
 from flask import request
 from functools import wraps
 from app.utils.response import error_response
 
 DEFAULT_EXP_MINUTES = 60
-_blacklist: Set[str] = set()
+_blacklist: set[str] = set()
 
 class JWTError(Exception):
     pass
@@ -49,7 +48,7 @@ def _load_current_user(payload: dict):
 
     raise JWTError('Invalid token role')
 
-def _get_secret():
+def _get_secret() -> str:
     secret = os.getenv('JWT_SECRET') or os.getenv('SECRET_KEY')
     if not secret:
         raise JWTError('JWT secret not configured (set JWT_SECRET or SECRET_KEY).')
@@ -90,7 +89,7 @@ def decode_token(token: str):
     except Exception as e:
         raise JWTError(f'Token validation failed: {e}')
 
-def revoke_token(token: str):
+def revoke_token(token: str) -> None:
     _blacklist.add(token)
 
 def _get_token_from_header():
