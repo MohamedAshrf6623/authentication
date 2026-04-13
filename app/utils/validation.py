@@ -1,7 +1,10 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, model_validator
 
 
-def validate_payload(model_cls, payload: dict):
+def validate_payload(model_cls: type[BaseModel], payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate a request payload against a Pydantic model and return a dict."""
     return model_cls.model_validate(payload).model_dump()
 
 
