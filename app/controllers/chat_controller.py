@@ -13,8 +13,6 @@ from datetime import datetime
 from flask import request, send_file
 import google.generativeai as genai
 from app.models.patient import Patient
-import speech_recognition as sr
-from gtts import gTTS
 from pydub import AudioSegment
 
 import chromadb
@@ -23,6 +21,51 @@ from app.utils.error_handler import handle_errors, AppError, ValidationError
 from app.utils.response import success_response
 from app.utils.validation import validate_payload, ChatAskPayload
 
+# --- New Imports for Local STT & XTTS ---
+import torch
+import torchaudio
+from transformers import pipeline
+from TTS.tts.configs.xtts_config import XttsConfig
+from TTS.tts.models.xtts import Xtts
+# ---------------------------------------
+
+# ==========================================
+# ===   Load ML Models (Global Scope)    ===
+# ==========================================
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+print(f"[INFO] Using device: {device}")
+
+# 1. Load Whisper Fine-Tuned (STT) - Local Model
+WHISPER_MODEL_DIR = "openai/whisper-small"
+try:
+    stt_pipe = pipeline("automatic-speech-recognition", model=WHISPER_MODEL_DIR, device=device)
+    print("[OK] Local Whisper STT Loaded Successfully")
+except Exception as e:
+    print(f"[ERROR] Local Whisper STT could not load: {e}")
+    stt_pipe = None
+
+# 2. Load Egyptian TTS (Local XTTS v2)
+TTS_BASE_MODEL_DIR = "/home/ubuntu/mobile/authentication/app/controllers/chat_model"
+CONFIG_PATH = os.path.join(TTS_BASE_MODEL_DIR, "config.json")
+VOCAB_PATH = os.path.join(TTS_BASE_MODEL_DIR, "vocab.json")
+SPEAKER_AUDIO_PATH = os.path.join(TTS_BASE_MODEL_DIR, "speaker_reference.wav")
+
+try:
+    print("[INFO] Loading EGTTS (XTTS) Config...")
+    config = XttsConfig()
+    config.load_json(CONFIG_PATH)
+    tts_model = Xtts.init_from_config(config)
+    tts_model.load_checkpoint(config, checkpoint_dir=TTS_BASE_MODEL_DIR, use_deepspeed=False, vocab_path=VOCAB_PATH)
+    tts_model.to(device)
+
+    print("[INFO] Computing speaker latents...")
+    gpt_cond_latent, speaker_embedding = tts_model.get_conditioning_latents(audio_path=[SPEAKER_AUDIO_PATH])
+    print("[OK] Local EGTTS Loaded Successfully via XTTS")
+except Exception as e:
+    print(f"[ERROR] Local EGTTS could not load: {e}")
+    tts_model = None
+    gpt_cond_latent = None
+    speaker_embedding = None
 
 # --- Vector DB Initialization ---
 DB_PATH = "/home/ubuntu/mobile/authentication/vector_db"
@@ -36,7 +79,6 @@ try:
 
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
     print("[OK] Vector DB & Model Loaded Successfully")
-
 except Exception as e:
     print(f"[ERROR] Critical Warning: Vector DB could not load: {e}")
     chroma_client = None
@@ -59,13 +101,12 @@ safety_settings = [
 ]
 
 # ==========================================
-# ===          Memory Functions (RAG)    ===
+# ===         Memory Functions (RAG)     ===
 # ==========================================
 def embed_text(text: str):
     if not embedding_model:
         return []
     return embedding_model.encode(text).tolist()
-
 
 def store_patient_vector(patient_id: str, text: str):
     if not collection or not embedding_model:
@@ -80,7 +121,6 @@ def store_patient_vector(patient_id: str, text: str):
         )
     except Exception as e:
         print(f"Store Vector Error: {e}")
-
 
 def search_patient_vectors(patient_id: str, query: str, k: int = 3):
     if not collection or not embedding_model:
@@ -105,7 +145,6 @@ def search_patient_vectors(patient_id: str, query: str, k: int = 3):
 # ==========================================
 def get_patient_context(patient_id):
     patient = Patient.query.filter_by(patient_id=patient_id).first()
-
     if not patient:
         return None
 
@@ -123,11 +162,9 @@ def get_patient_context(patient_id):
         doctor_name = patient.doctor.name
         doctor_phone = getattr(patient.doctor, 'phone', 'N/A')
 
-    # --- Fetch Caregiver correctly from the database ---
     care_name = "Not Assigned"
     care_phone = "N/A"
     care_rel = "Caregiver"
-    
     if hasattr(patient, 'care_giver') and patient.care_giver:
         care_name = patient.care_giver.name
         care_phone = getattr(patient.care_giver, 'phone', 'N/A')
@@ -138,17 +175,11 @@ def get_patient_context(patient_id):
         f"Treating Doctor: {doctor_name} (Phone: {doctor_phone})\n"
         f"Caregiver/Emergency: {care_name} ({care_rel}, Phone: {care_phone})\n"
     )
-    # ---------------------------------------------------
 
     if patient.prescriptions:
         info += "\n=== MEDICATION SCHEDULE ===\n"
         for presc in patient.prescriptions:
-            med_name = "Unknown"
-            if hasattr(presc, 'medicine') and presc.medicine:
-                med_name = presc.medicine.name
-            elif hasattr(presc, 'medicine_name'):
-                med_name = presc.medicine_name
-
+            med_name = getattr(presc.medicine, 'name', getattr(presc, 'medicine_name', 'Unknown'))
             time_str = str(presc.schedule_time) if presc.schedule_time else "Any time"
             notes = presc.notes if presc.notes else "-"
             info += f"- Drug: {med_name} | Time: {time_str} | Note: {notes}\n"
@@ -157,47 +188,54 @@ def get_patient_context(patient_id):
 
     found_games = False
     game_info = "\n=== GAME SCORES (MEMORY EXERCISES) ===\n"
-
     if hasattr(patient, 'game_scores') and patient.game_scores:
         found_games = True
         for score in patient.game_scores:
-            g_name = getattr(score, 'game_name', 'Memory Game')
-            g_score = getattr(score, 'score', 0)
-            game_info += f"- Game: {g_name} | Score: {g_score}\n"
-
+            game_info += f"- Game: {getattr(score, 'game_name', 'Memory Game')} | Score: {getattr(score, 'score', 0)}\n"
     elif hasattr(patient, 'games') and patient.games:
         found_games = True
         for game in patient.games:
-            g_name = getattr(game, 'name', 'Game')
-            g_score = getattr(game, 'high_score', 0)
-            game_info += f"- Game: {g_name} | Score: {g_score}\n"
+            game_info += f"- Game: {getattr(game, 'name', 'Game')} | Score: {getattr(game, 'high_score', 0)}\n"
 
     if not found_games:
         game_info += "No game records found yet.\n"
 
     info += game_info
-
     return info
 
 # ==========================================
 # ===            Audio Helpers           ===
 # ==========================================
 def speech_to_text(audio_file_path):
-    recognizer = sr.Recognizer()
+    """ Converts Speech to Text using local fine-tuned Whisper """
+    if not stt_pipe:
+        print("[ERROR] STT Pipeline is not initialized.")
+        return None
     try:
-        with sr.AudioFile(audio_file_path) as source:
-            audio_data = recognizer.record(source)
-            return recognizer.recognize_google(audio_data, language="ar-EG")
-    except Exception:
+        result = stt_pipe(audio_file_path)
+        return result.get("text", "").strip()
+    except Exception as e:
+        print(f"[ERROR] Whisper STT processing failed: {e}")
         return None
 
-
 def text_to_speech(text, output_path):
+    """ Converts Text to Speech using Local XTTS Model """
+    if not tts_model:
+        print("[ERROR] EGTTS Model is not initialized.")
+        return False
     try:
-        tts = gTTS(text=text, lang='ar')
-        tts.save(output_path)
+        out = tts_model.inference(
+            text=text,
+            language="ar",
+            gpt_cond_latent=gpt_cond_latent,
+            speaker_embedding=speaker_embedding,
+            temperature=0.3
+        )
+        # حفظ الملف الصوتي بمعدل 24000 هرتز المتوافق مع XTTS
+        torchaudio.save(output_path, torch.tensor(out["wav"]).unsqueeze(0), 24000)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] Local XTTS processing failed: {e}")
         return False
 
 # ==========================================
@@ -223,23 +261,17 @@ def ask_text():
 
     final_context = f"""
     Current Time: {current_time}
-
     Structured Database Info (Doctor, Meds, Games, Caregiver):
     {patient_context}
-
     Relevant Memory (Previous Chats):
     {vector_context}
     """
 
-    # --- Text Prompt customized for strict responses based on DB ---
     system_prompt = f"""
     You are a smart, kind, and comprehensive medical assistant for an Alzheimer's patient.
-
     You have full access to the patient's private records below.
     Use ONLY this data to answer. Do NOT hallucinate names or relations.
-
     {final_context}
-
     Instructions:
     1. **Doctor & Caregiver:** If asked about the doctor, caregiver, or who to call, look EXCLUSIVELY at the "MEDICAL TEAM (CONTACTS)" section.
     2. **Medicines:** If asked about meds or time, check "MEDICATION SCHEDULE". Compare with "Current Time".
@@ -248,7 +280,6 @@ def ask_text():
 
     User Question: "{question}"
     """
-    # -------------------------------------------------------------
 
     response = model.generate_content(system_prompt, safety_settings=safety_settings)
     try:
@@ -261,7 +292,6 @@ def ask_text():
         message='AI response generated',
         status_code=200,
     )
-
 
 @handle_errors('Voice processing failed')
 def ask_voice():
@@ -277,12 +307,14 @@ def ask_voice():
     unique_id = uuid.uuid4()
     input_path = f"/tmp/{unique_id}_in"
     wav_path = f"/tmp/{unique_id}.wav"
-    output_path = f"/tmp/{unique_id}_out.mp3"
+    output_path = f"/tmp/{unique_id}_out.wav"
 
     try:
         audio_file.save(input_path)
+
         sound = AudioSegment.from_file(input_path)
         sound.export(wav_path, format="wav")
+
         user_text = speech_to_text(wav_path)
 
         if not user_text:
@@ -300,19 +332,17 @@ def ask_voice():
         Memory: {vector_context}
         """
 
-        # --- Voice Prompt customized for strict responses based on DB ---
         system_prompt = f"""
         You are a smart voice assistant for an Alzheimer's patient.
         Context: {final_context}
         User said: "{user_text}"
-        
+
         Instructions:
         - If asked about Doctor or Caregiver, look at the "MEDICAL TEAM (CONTACTS)" in DB Data.
         - If asked about Meds, check "MEDICATION SCHEDULE".
         - Do not invent information. If it's not in the Context, say you don't know.
-        - Reply warmly and concisely in Arabic (Egyptian dialect preferred).
+        - Reply warmly and concisely in Arabic (Egyptian dialect preferred). Make sure the text is written in clean Arabic letters so the TTS model reads it naturally.
         """
-        # --------------------------------------------------------------
 
         response = model.generate_content(system_prompt, safety_settings=safety_settings)
         try:
@@ -321,10 +351,13 @@ def ask_voice():
             ai_text = "عذراً، لا يمكنني الرد حالياً."
 
         if text_to_speech(ai_text, output_path):
-            return send_file(output_path, mimetype="audio/mpeg", as_attachment=True, download_name="reply.mp3")
+            return send_file(output_path, mimetype="audio/wav", as_attachment=True, download_name="reply.wav")
         raise AppError('TTS Failed', status_code=500)
 
     finally:
         for path in [input_path, wav_path, output_path]:
             if os.path.exists(path):
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
