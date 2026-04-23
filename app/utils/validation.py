@@ -1,16 +1,11 @@
 from typing import Any
-
 from pydantic import BaseModel, ConfigDict, model_validator
 
-
 def validate_payload(model_cls: type[BaseModel], payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate a request payload against a Pydantic model and return a dict."""
     return model_cls.model_validate(payload).model_dump()
-
 
 class RegisterPatientPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     name: str
     email: str
     password: str
@@ -26,10 +21,8 @@ class RegisterPatientPayload(BaseModel):
     age_category: str | None = None
     hospital_address: str | None = None
 
-
 class RegisterDoctorPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     name: str
     email: str
     password: str
@@ -41,10 +34,8 @@ class RegisterDoctorPayload(BaseModel):
     city: str | None = None
     clinic_address: str | None = None
 
-
 class RegisterCaregiverPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     name: str
     email: str
     password: str
@@ -54,10 +45,8 @@ class RegisterCaregiverPayload(BaseModel):
     city: str | None = None
     address: str | None = None
 
-
 class LoginPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     email: str | None = None
     username: str | None = None
     name: str | None = None
@@ -70,25 +59,19 @@ class LoginPayload(BaseModel):
             raise ValueError('email, username, or name is required')
         return self
 
-
 class ForgetPasswordPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     email: str
     role: str | None = None
 
-
 class ResetPasswordPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     token: str | None = None
     password: str
     confirm_password: str | None = None
 
-
 class UpdateMyPasswordPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     password_current: str | None = None
     current_password: str | None = None
     password: str | None = None
@@ -105,10 +88,8 @@ class UpdateMyPasswordPayload(BaseModel):
             raise ValueError('password and confirm_password are required')
         return self
 
-
 class UpdateMePayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     name: str | None = None
     email: str | None = None
     age: int | None = None
@@ -123,18 +104,19 @@ class UpdateMePayload(BaseModel):
     clinic_address: str | None = None
     relation: str | None = None
 
-
 class ChatAskPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     message: str
-
 
 class AddPrescriptionPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
     patient_id: str
     medicine_id: int
     schedule_time: str
     alzhiemer_level: str | None = None
     notes: str | None = None
+
+# --- التعديل: إضافة موديل توكن الموبايل ---
+class RegisterDeviceTokenPayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    fcm_token: str
