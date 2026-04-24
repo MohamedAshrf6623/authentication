@@ -9,9 +9,11 @@ from .doctor import Doctor
 from .caregiver import CareGiver
 from .medicine import Medicine
 from .game import Game
+from .game_score import GameScore
 from .patient import Patient
 from .prescription import MPrescription
 from .location import Location
+from .todo import ToDo
 
 __all__ = [
     'db',
@@ -19,7 +21,9 @@ __all__ = [
     'CareGiver',
     'Medicine',
     'Game',
+    'GameScore',
     'Patient',
     'MPrescription',
     'Location',
+    'ToDo',
 ]

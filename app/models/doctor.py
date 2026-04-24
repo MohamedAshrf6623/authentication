@@ -22,6 +22,7 @@ class Doctor(db.Model):
     active = db.Column(db.Boolean, nullable=False, default=True)
 
     patients = db.relationship('Patient', back_populates='doctor')
+    game_scores = db.relationship('GameScore', back_populates='doctor', order_by='desc(GameScore.created_at)')
 
     def set_password(self, raw_password: str):
         """Hash and store password. bcrypt has 72-byte limit."""

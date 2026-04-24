@@ -1,6 +1,7 @@
 from flask import request
 from sqlalchemy import func
 from datetime import datetime
+from uuid import uuid4
 
 from app import db
 from app.models.patient import Patient
@@ -8,8 +9,10 @@ from app.models.caregiver import CareGiver
 from app.models.doctor import Doctor
 from app.models.medicine import Medicine
 from app.models.prescription import MPrescription
+from app.models.game_score import GameScore
+from app.models.todo import ToDo
 from app.utils.jwt import decode_token, JWTError, revoke_token
-from app.utils.error_handler import handle_errors, AuthError, ValidationError, NotFoundError
+from app.utils.error_handler import handle_errors, AppError, AuthError, ValidationError, NotFoundError
 from app.utils.response import success_response
 
 # --- التعديل: استيراد الموديلات والدوال الجديدة ---
@@ -17,7 +20,10 @@ from app.utils.validation import (
     validate_payload,
     UpdateMePayload,
     AddPrescriptionPayload,
-    RegisterDeviceTokenPayload
+    AddGameScorePayload,
+    RegisterDeviceTokenPayload,
+    AddTodoPayload,
+    UpdateTodoPayload,
 )
 from app.utils.sns_helper import register_device_to_sns, send_push_notification
 # ---------------------------------------------
@@ -115,6 +121,93 @@ def _parse_schedule_time(schedule_time_value: str):
         try: return datetime.strptime(value, fmt).time()
         except ValueError: continue
     raise ValidationError('Invalid schedule_time format. Use HH:MM or HH:MM:SS')
+
+
+def _parse_due_date(due_date_value):
+    if due_date_value is None:
+        return None
+    value = str(due_date_value).strip()
+    if not value:
+        return None
+    try:
+        normalized = value.replace('Z', '+00:00')
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed
+    except ValueError as exc:
+        raise ValidationError('Invalid due_date format. Use ISO-8601 datetime') from exc
+
+
+def _todo_to_dict(todo: ToDo):
+    return {
+        'todo_id': todo.todo_id,
+        'patient_id': todo.patient_id,
+        'title': todo.title,
+        'description': todo.description,
+        'due_date': todo.due_date.isoformat() if todo.due_date else None,
+        'is_done': todo.is_done,
+        'created_by_role': todo.created_by_role,
+        'created_by_id': todo.created_by_id,
+        'created_at': todo.created_at.isoformat() if todo.created_at else None,
+        'updated_at': todo.updated_at.isoformat() if todo.updated_at else None,
+    }
+
+
+def _game_score_to_dict(game_score: GameScore):
+    return {
+        'game_score_id': game_score.game_score_id,
+        'doctor_id': game_score.doctor_id,
+        'patient_id': game_score.patient_id,
+        'score': game_score.score,
+        'created_at': game_score.created_at.isoformat() if game_score.created_at else None,
+    }
+
+
+def _resolve_token_identity():
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+    try:
+        payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = payload.get('role')
+    subject = payload.get('sub')
+    if role not in ['patient', 'doctor', 'caregiver'] or not subject:
+        raise AuthError('Invalid token payload')
+    return role, subject
+
+
+def _doctor_patient_guard(doctor_id: str, patient_id: str):
+    doctor = Doctor.query.filter_by(doctor_id=doctor_id).first()
+    if not doctor or not doctor.active:
+        raise AuthError('Doctor account issues')
+
+    patient = Patient.query.filter_by(patient_id=patient_id).first()
+    if not patient or not patient.active:
+        raise NotFoundError('Patient not found/active')
+
+    if patient.doctor_id != doctor_id:
+        raise AuthError('Unauthorized for this patient')
+
+    return patient
+
+
+def _caregiver_patient_guard(caregiver_id: str, patient_id: str):
+    caregiver = CareGiver.query.filter_by(care_giver_id=caregiver_id).first()
+    if not caregiver or not caregiver.active:
+        raise AuthError('Caregiver account issues')
+
+    patient = Patient.query.filter_by(patient_id=patient_id).first()
+    if not patient or not patient.active:
+        raise NotFoundError('Patient not found/active')
+
+    if patient.care_giver_id != caregiver_id:
+        raise AuthError('Unauthorized for this patient')
+
+    return patient
 
 @handle_errors('Fetch profile failed')
 def me():
@@ -236,6 +329,63 @@ def my_patients():
     return success_response(data={'patients': patients})
 
 # --- التعديل: دالة تسجيل توكن الموبايل ---
+@handle_errors('Add game score failed')
+def add_game_score():
+    payload = validate_payload(AddGameScorePayload, request.get_json() or {})
+    token = _get_token_from_header()
+    if not token:
+        raise AuthError('Missing Bearer token')
+    try:
+        token_payload = decode_token(token)
+    except JWTError as e:
+        raise AuthError(str(e)) from e
+
+    role = token_payload.get('role')
+    doctor_id_from_token = token_payload.get('sub')
+    if role != 'doctor' or not doctor_id_from_token:
+        raise AuthError('Only doctors can add game scores')
+    if doctor_id_from_token != payload['doctor_id']:
+        raise AuthError('doctor_id does not match authenticated doctor')
+
+    patient = _doctor_patient_guard(payload['doctor_id'], payload['patient_id'])
+
+    game_score = GameScore(
+        game_score_id=str(uuid4()),
+        doctor_id=payload['doctor_id'],
+        patient_id=patient.patient_id,
+        score=payload['score'],
+    )
+    db.session.add(game_score)
+    db.session.commit()
+
+    return success_response(
+        message='Game score added successfully',
+        data=_game_score_to_dict(game_score),
+        status_code=201,
+    )
+
+
+@handle_errors('Fetch patient game scores failed')
+def get_patient_game_scores(patient_id: str):
+    patient = Patient.query.filter_by(patient_id=patient_id).first()
+    if not patient or not patient.active:
+        raise NotFoundError('Patient not found/active')
+
+    scores = (
+        GameScore.query
+        .filter_by(patient_id=patient.patient_id)
+        .order_by(GameScore.created_at.desc())
+        .all()
+    )
+
+    return success_response(
+        data={
+            'patient_id': patient.patient_id,
+            'scores': [_game_score_to_dict(score) for score in scores],
+        }
+    )
+
+
 @handle_errors('Register device token failed')
 def register_device_token():
     payload = validate_payload(RegisterDeviceTokenPayload, request.get_json() or {})
@@ -255,3 +405,127 @@ def register_device_token():
         db.session.commit()
         return success_response(message='Device registered for notifications')
     raise AppError('Failed to register device with AWS', status_code=500)
+
+
+@handle_errors('Add todo failed')
+def add_todo():
+    payload = validate_payload(AddTodoPayload, request.get_json() or {})
+    role, subject = _resolve_token_identity()
+
+    if role not in ['patient', 'caregiver']:
+        raise AuthError('Only patient or caregiver can add todo')
+
+    title = (payload.get('title') or '').strip()
+    if not title:
+        raise ValidationError('title is required')
+
+    if role == 'patient':
+        patient_id = subject
+        requested_patient_id = payload.get('patient_id')
+        if requested_patient_id and requested_patient_id != patient_id:
+            raise AuthError('Patient can only add todo for self')
+        patient = Patient.query.filter_by(patient_id=patient_id).first()
+        if not patient or not patient.active:
+            raise NotFoundError('Patient not found/active')
+    else:
+        patient_id = payload.get('patient_id')
+        if not patient_id:
+            raise ValidationError('patient_id is required for caregiver')
+        patient = _caregiver_patient_guard(subject, patient_id)
+
+    todo = ToDo(
+        todo_id=str(uuid4()),
+        patient_id=patient.patient_id,
+        title=title,
+        description=payload.get('description'),
+        due_date=_parse_due_date(payload.get('due_date')),
+        is_done=False,
+        created_by_role=role,
+        created_by_id=subject,
+    )
+    db.session.add(todo)
+    db.session.commit()
+
+    return success_response(
+        message='Todo added successfully',
+        data=_todo_to_dict(todo),
+        status_code=201,
+    )
+
+
+@handle_errors('Fetch patient todos failed')
+def get_patient_todos(patient_id: str):
+    role, subject = _resolve_token_identity()
+    if role != 'caregiver':
+        raise AuthError('Only caregivers can view patient todos')
+
+    patient = _caregiver_patient_guard(subject, patient_id)
+    todos = (
+        ToDo.query
+        .filter_by(patient_id=patient.patient_id)
+        .order_by(ToDo.created_at.desc())
+        .all()
+    )
+
+    return success_response(
+        data={
+            'patient_id': patient.patient_id,
+            'todos': [_todo_to_dict(todo) for todo in todos],
+        }
+    )
+
+
+@handle_errors('Update todo failed')
+def update_todo(todo_id: str):
+    payload = validate_payload(UpdateTodoPayload, request.get_json() or {})
+    role, subject = _resolve_token_identity()
+    if role != 'caregiver':
+        raise AuthError('Only caregivers can update todo')
+
+    todo = ToDo.query.filter_by(todo_id=todo_id).first()
+    if not todo:
+        raise NotFoundError('Todo not found')
+
+    _caregiver_patient_guard(subject, todo.patient_id)
+
+    if all(value is None for value in payload.values()):
+        raise ValidationError('At least one field is required to update')
+
+    if payload.get('title') is not None:
+        title = str(payload.get('title')).strip()
+        if not title:
+            raise ValidationError('title cannot be empty')
+        todo.title = title
+
+    if payload.get('description') is not None:
+        todo.description = payload.get('description')
+
+    if payload.get('due_date') is not None:
+        todo.due_date = _parse_due_date(payload.get('due_date'))
+
+    if payload.get('is_done') is not None:
+        todo.is_done = bool(payload.get('is_done'))
+
+    db.session.commit()
+    return success_response(message='Todo updated successfully', data=_todo_to_dict(todo))
+
+
+@handle_errors('Delete todo failed')
+def delete_todo(todo_id: str):
+    role, subject = _resolve_token_identity()
+    if role not in ['patient', 'caregiver']:
+        raise AuthError('Access denied')
+
+    todo = ToDo.query.filter_by(todo_id=todo_id).first()
+    if not todo:
+        raise NotFoundError('Todo not found')
+
+    if role == 'patient':
+        if todo.patient_id != subject:
+            raise AuthError('Unauthorized to delete this todo')
+    else:
+        _caregiver_patient_guard(subject, todo.patient_id)
+
+    db.session.delete(todo)
+    db.session.commit()
+    return success_response(message='Todo deleted successfully')

@@ -120,3 +120,26 @@ class AddPrescriptionPayload(BaseModel):
 class RegisterDeviceTokenPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
     fcm_token: str
+
+
+class AddGameScorePayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    doctor_id: str
+    patient_id: str
+    score: int
+
+
+class AddTodoPayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str
+    description: str | None = None
+    due_date: str | None = None
+    patient_id: str | None = None
+
+
+class UpdateTodoPayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str | None = None
+    description: str | None = None
+    due_date: str | None = None
+    is_done: bool | None = None

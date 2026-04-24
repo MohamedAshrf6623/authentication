@@ -34,6 +34,7 @@ class Patient(db.Model):
     doctor = db.relationship('Doctor', back_populates='patients')
     care_giver = db.relationship('CareGiver', back_populates='patients')
     prescriptions = db.relationship('MPrescription', back_populates='patient')
+    game_scores = db.relationship('GameScore', back_populates='patient', order_by='desc(GameScore.created_at)')
 
     def set_password(self, raw_password: str):
         if isinstance(raw_password, str):

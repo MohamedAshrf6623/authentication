@@ -130,6 +130,21 @@ JWT_EXP_MINUTES=120
 ```
 To set lifetime to 2 hours.
 
+### 6.8 Game scores
+`POST /user/games/scores`
+Body:
+```json
+{
+  "doctor_id": "doctor-123",
+  "patient_id": "patient-456",
+  "score": 85
+}
+```
+
+`GET /user/games/scores/patient/<patient_id>`
+
+Returns all saved scores for the patient ordered by newest first.
+
 ## 7. Create an initial patient (Python REPL)
 ```powershell
 python
