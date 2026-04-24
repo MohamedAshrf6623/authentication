@@ -248,7 +248,7 @@ def ask_text():
         raise AppError('Access denied.', status_code=403)
 
     patient_id = payload.get('sub')
-    data = validate_payload(ChatAskPayload, request.get_json() or {})
+    data = validate_payload(ChatAskPayload, request.get_json(silent=True) or {})
     question = data.get('message')
     if not question:
         raise ValidationError('Message required')

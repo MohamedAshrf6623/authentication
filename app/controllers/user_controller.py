@@ -230,7 +230,7 @@ def me():
 
 @handle_errors('Update profile failed')
 def updateme():
-    data = validate_payload(UpdateMePayload, request.get_json() or {})
+    data = validate_payload(UpdateMePayload, request.get_json(silent=True) or {})
     if data.get('password'): raise ValidationError('Use /auth/updatemypassword for password updates.')
     token = _get_token_from_header()
     if not token: raise AuthError('Missing Bearer token')
@@ -270,7 +270,7 @@ def deleteme():
 
 @handle_errors('Add prescription failed')
 def add_prescription():
-    payload = validate_payload(AddPrescriptionPayload, request.get_json() or {})
+    payload = validate_payload(AddPrescriptionPayload, request.get_json(silent=True) or {})
     token = _get_token_from_header()
     if not token: raise AuthError('Missing Bearer token')
     try: token_payload = decode_token(token)
@@ -331,7 +331,7 @@ def my_patients():
 # --- التعديل: دالة تسجيل توكن الموبايل ---
 @handle_errors('Add game score failed')
 def add_game_score():
-    payload = validate_payload(AddGameScorePayload, request.get_json() or {})
+    payload = validate_payload(AddGameScorePayload, request.get_json(silent=True) or {})
     token = _get_token_from_header()
     if not token:
         raise AuthError('Missing Bearer token')
@@ -388,7 +388,7 @@ def get_patient_game_scores(patient_id: str):
 
 @handle_errors('Register device token failed')
 def register_device_token():
-    payload = validate_payload(RegisterDeviceTokenPayload, request.get_json() or {})
+    payload = validate_payload(RegisterDeviceTokenPayload, request.get_json(silent=True) or {})
     token = _get_token_from_header()
     if not token: raise AuthError('Missing Bearer token')
     try: tp = decode_token(token)
@@ -409,7 +409,7 @@ def register_device_token():
 
 @handle_errors('Add todo failed')
 def add_todo():
-    payload = validate_payload(AddTodoPayload, request.get_json() or {})
+    payload = validate_payload(AddTodoPayload, request.get_json(silent=True) or {})
     role, subject = _resolve_token_identity()
 
     if role not in ['patient', 'caregiver']:
@@ -456,10 +456,17 @@ def add_todo():
 @handle_errors('Fetch patient todos failed')
 def get_patient_todos(patient_id: str):
     role, subject = _resolve_token_identity()
-    if role != 'caregiver':
-        raise AuthError('Only caregivers can view patient todos')
+    if role == 'patient':
+        if subject != patient_id:
+            raise AuthError('Patient can only view own todos')
+        patient = Patient.query.filter_by(patient_id=patient_id).first()
+        if not patient or not patient.active:
+            raise NotFoundError('Patient not found/active')
+    elif role == 'caregiver':
+        patient = _caregiver_patient_guard(subject, patient_id)
+    else:
+        raise AuthError('Only patient or caregiver can view todos')
 
-    patient = _caregiver_patient_guard(subject, patient_id)
     todos = (
         ToDo.query
         .filter_by(patient_id=patient.patient_id)
@@ -477,16 +484,20 @@ def get_patient_todos(patient_id: str):
 
 @handle_errors('Update todo failed')
 def update_todo(todo_id: str):
-    payload = validate_payload(UpdateTodoPayload, request.get_json() or {})
+    payload = validate_payload(UpdateTodoPayload, request.get_json(silent=True) or {})
     role, subject = _resolve_token_identity()
-    if role != 'caregiver':
-        raise AuthError('Only caregivers can update todo')
+    if role not in ['patient', 'caregiver']:
+        raise AuthError('Only patient or caregiver can update todo')
 
     todo = ToDo.query.filter_by(todo_id=todo_id).first()
     if not todo:
         raise NotFoundError('Todo not found')
 
-    _caregiver_patient_guard(subject, todo.patient_id)
+    if role == 'patient':
+        if todo.patient_id != subject:
+            raise AuthError('Patient can only update own todos')
+    else:
+        _caregiver_patient_guard(subject, todo.patient_id)
 
     if all(value is None for value in payload.values()):
         raise ValidationError('At least one field is required to update')
