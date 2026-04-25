@@ -45,6 +45,9 @@ def _load_current_user(payload: dict):
     if role == 'caregiver':
         from app.models.caregiver import CareGiver
         return CareGiver.query.filter_by(care_giver_id=sub).first()
+    if role == 'admin':
+        from app.models.admin import Admin
+        return Admin.query.filter_by(admin_id=sub).first()
 
     raise JWTError('Invalid token role')
 

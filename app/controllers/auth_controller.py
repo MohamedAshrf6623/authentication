@@ -7,6 +7,7 @@ import hashlib
 import os
 from datetime import datetime, timedelta
 from app import db
+from app.models.admin import Admin
 from app.models.patient import Patient
 from app.models.caregiver import CareGiver
 from app.models.doctor import Doctor
@@ -14,6 +15,7 @@ from app.utils.jwt import create_access_token, decode_token, JWTError, revoke_to
 from app.utils.error_handler import handle_errors, AppError, ValidationError, AuthError, NotFoundError
 from app.utils.response import success_response
 from app.utils.email import send_password_reset_email
+from app.utils.audit import record_system_log
 from app.utils.validation import (
     validate_payload,
     RegisterPatientPayload,
@@ -116,6 +118,15 @@ def _doctor_to_dict(doctor: Doctor):
     }
 
 
+def _admin_to_dict(admin: Admin):
+    return {
+        'admin_id': admin.admin_id,
+        'name': admin.name,
+        'email': admin.email,
+        'active': admin.active,
+    }
+
+
 def _issue_token(subject: str, role: str, password_hash: str | None = None):
     extra = None
     pwd_sig = build_password_signature(password_hash)
@@ -144,6 +155,8 @@ def _model_by_role(role: str):
         return Doctor
     if role == 'caregiver':
         return CareGiver
+    if role == 'admin':
+        return Admin
     return None
 
 
@@ -152,6 +165,8 @@ def _subject_for_user(user_obj, role: str):
         return str(user_obj.patient_id)
     if role == 'doctor':
         return str(user_obj.doctor_id)
+    if role == 'admin':
+        return str(user_obj.admin_id)
     return str(user_obj.care_giver_id)
 
 
@@ -160,6 +175,8 @@ def _public_user_payload(user_obj, role: str):
         return {'patient': _patient_to_dict(user_obj)}
     if role == 'doctor':
         return {'doctor': _doctor_to_dict(user_obj)}
+    if role == 'admin':
+        return {'admin': _admin_to_dict(user_obj)}
     return {'caregiver': _caregiver_to_dict(user_obj)}
 
 
@@ -199,7 +216,7 @@ def _resolve_user_by_email(email: str, role: str | None):
     if role:
         model = _model_by_role(role)
         if not model:
-            raise ValidationError('Invalid role. Allowed: patient, doctor, caregiver')
+            raise ValidationError('Invalid role. Allowed: patient, doctor, caregiver, admin')
         user_obj = model.query.filter(func.lower(model.email) == email).first()
         return user_obj, role
 
@@ -213,15 +230,18 @@ def _resolve_user_by_email(email: str, role: str | None):
     caregiver = CareGiver.query.filter(func.lower(CareGiver.email) == email).first()
     if caregiver:
         matches.append((caregiver, 'caregiver'))
+    admin = Admin.query.filter(func.lower(Admin.email) == email).first()
+    if admin:
+        matches.append((admin, 'admin'))
 
     if len(matches) > 1:
-        raise ValidationError('Email exists in multiple accounts; provide role (patient/doctor/caregiver)')
+        raise ValidationError('Email exists in multiple accounts; provide role (patient/doctor/caregiver/admin)')
     if len(matches) == 1:
         return matches[0]
     return None, None
 
 
-def _register_patient(data: dict):
+def _register_patient(data: dict, issue_token: bool = True, log_event: bool = True):
     required = ['name', 'email', 'password', 'doctor_id', 'care_giver_id']
     missing = _missing_fields(data, required)
     if missing:
@@ -262,15 +282,29 @@ def _register_patient(data: dict):
     db.session.add(patient)
     db.session.commit()
 
-    token = _issue_token(str(patient.patient_id), 'patient', patient.password)
+    if log_event:
+        record_system_log(
+            event_type='patient_registered',
+            message='Patient registered',
+            target_role='patient',
+            target_id=patient.patient_id,
+            target_email=patient.email,
+            details={'name': patient.name},
+        )
+        db.session.commit()
+
+    response_data = {'patient': _patient_to_dict(patient)}
+    if issue_token:
+        response_data['token'] = _issue_token(str(patient.patient_id), 'patient', patient.password)
+
     return success_response(
-        data={'token': token, 'patient': _patient_to_dict(patient)},
+        data=response_data,
         message='Patient registered successfully',
         status_code=201,
     )
 
 
-def _register_doctor(data: dict):
+def _register_doctor(data: dict, issue_token: bool = True, log_event: bool = True):
     required = ['name', 'email', 'password']
     missing = _missing_fields(data, required)
     if missing:
@@ -299,15 +333,29 @@ def _register_doctor(data: dict):
     db.session.add(doctor)
     db.session.commit()
 
-    token = _issue_token(str(doctor.doctor_id), 'doctor', doctor.password)
+    if log_event:
+        record_system_log(
+            event_type='doctor_created',
+            message='Doctor registered',
+            target_role='doctor',
+            target_id=doctor.doctor_id,
+            target_email=doctor.email,
+            details={'name': doctor.name},
+        )
+        db.session.commit()
+
+    response_data = {'doctor': _doctor_to_dict(doctor)}
+    if issue_token:
+        response_data['token'] = _issue_token(str(doctor.doctor_id), 'doctor', doctor.password)
+
     return success_response(
-        data={'token': token, 'doctor': _doctor_to_dict(doctor)},
+        data=response_data,
         message='Doctor registered successfully',
         status_code=201,
     )
 
 
-def _register_caregiver(data: dict):
+def _register_caregiver(data: dict, issue_token: bool = True, log_event: bool = True):
     required = ['name', 'email', 'password']
     missing = _missing_fields(data, required)
     if missing:
@@ -334,9 +382,23 @@ def _register_caregiver(data: dict):
     db.session.add(caregiver)
     db.session.commit()
 
-    token = _issue_token(str(caregiver.care_giver_id), 'caregiver', caregiver.password)
+    if log_event:
+        record_system_log(
+            event_type='caregiver_created',
+            message='Caregiver registered',
+            target_role='caregiver',
+            target_id=caregiver.care_giver_id,
+            target_email=caregiver.email,
+            details={'name': caregiver.name},
+        )
+        db.session.commit()
+
+    response_data = {'caregiver': _caregiver_to_dict(caregiver)}
+    if issue_token:
+        response_data['token'] = _issue_token(str(caregiver.care_giver_id), 'caregiver', caregiver.password)
+
     return success_response(
-        data={'token': token, 'caregiver': _caregiver_to_dict(caregiver)},
+        data=response_data,
         message='Caregiver registered successfully',
         status_code=201,
     )
@@ -389,6 +451,9 @@ def login():
     def _match_caregiver():
         return CareGiver.query.filter(or_(func.lower(CareGiver.email) == ident_lower, CareGiver.name == identifier)).first()
 
+    def _match_admin():
+        return Admin.query.filter(or_(func.lower(Admin.email) == ident_lower, Admin.name == identifier)).first()
+
     if role == 'patient':
         candidate = _match_patient()
         if candidate and candidate.verify_password(password):
@@ -401,6 +466,10 @@ def login():
         candidate = _match_caregiver()
         if candidate and candidate.verify_password(password):
             user_obj, user_role = candidate, 'caregiver'
+    elif role == 'admin':
+        candidate = _match_admin()
+        if candidate and candidate.verify_password(password):
+            user_obj, user_role = candidate, 'admin'
     else:
         p = _match_patient()
         if p and p.verify_password(password):
@@ -413,6 +482,10 @@ def login():
                 c = _match_caregiver()
                 if c and c.verify_password(password):
                     user_obj, user_role = c, 'caregiver'
+                else:
+                    a = _match_admin()
+                    if a and a.verify_password(password):
+                        user_obj, user_role = a, 'admin'
 
     if not user_obj:
         raise AuthError('invalid credentials')
@@ -422,6 +495,14 @@ def login():
 
     if user_role == 'patient':
         token = _issue_token(str(user_obj.patient_id), user_role, user_obj.password)
+        record_system_log(
+            event_type='patient_login',
+            message='Patient logged in',
+            target_role='patient',
+            target_id=user_obj.patient_id,
+            target_email=user_obj.email,
+        )
+        db.session.commit()
         return success_response(
             data={'token': token, 'role': user_role, 'patient': _patient_to_dict(user_obj)},
             message='Login successful',
@@ -429,13 +510,45 @@ def login():
         )
     if user_role == 'doctor':
         token = _issue_token(str(user_obj.doctor_id), user_role, user_obj.password)
+        record_system_log(
+            event_type='doctor_login',
+            message='Doctor logged in',
+            target_role='doctor',
+            target_id=user_obj.doctor_id,
+            target_email=user_obj.email,
+        )
+        db.session.commit()
         return success_response(
             data={'token': token, 'role': user_role, 'doctor': _doctor_to_dict(user_obj)},
             message='Login successful',
             status_code=200,
         )
 
+    if user_role == 'admin':
+        token = _issue_token(str(user_obj.admin_id), user_role, user_obj.password)
+        record_system_log(
+            event_type='admin_login',
+            message='Admin logged in',
+            target_role='admin',
+            target_id=user_obj.admin_id,
+            target_email=user_obj.email,
+        )
+        db.session.commit()
+        return success_response(
+            data={'token': token, 'role': user_role, 'admin': _admin_to_dict(user_obj)},
+            message='Login successful',
+            status_code=200,
+        )
+
     token = _issue_token(str(user_obj.care_giver_id), user_role, user_obj.password)
+    record_system_log(
+        event_type='caregiver_login',
+        message='Caregiver logged in',
+        target_role='caregiver',
+        target_id=user_obj.care_giver_id,
+        target_email=user_obj.email,
+    )
+    db.session.commit()
     return success_response(
         data={'token': token, 'role': user_role, 'caregiver': _caregiver_to_dict(user_obj)},
         message='Login successful',
@@ -540,6 +653,15 @@ def reset_password():
         resolved_role = 'caregiver'
 
     if not user_obj:
+        user_obj = (
+            Admin.query.filter(
+                Admin.password_reset_token == hashed_token,
+                Admin.password_reset_expires > now_utc,
+            ).first()
+        )
+        resolved_role = 'admin'
+
+    if not user_obj:
         raise ValidationError('Token is invalid or has expired')
 
     # 3) Set new password and clear reset token fields
@@ -595,7 +717,7 @@ def update_my_password():
 
     role = payload.get('role')
     sub = payload.get('sub')
-    if role not in ('patient', 'doctor', 'caregiver'):
+    if role not in ('patient', 'doctor', 'caregiver', 'admin'):
         raise AuthError('Invalid token role')
 
     # 1) Get user from collection
@@ -605,6 +727,9 @@ def update_my_password():
     elif role == 'doctor':
         user_obj = Doctor.query.filter_by(doctor_id=sub).first()
         not_found_message = 'Doctor not found'
+    elif role == 'admin':
+        user_obj = Admin.query.filter_by(admin_id=sub).first()
+        not_found_message = 'Admin not found'
     else:
         user_obj = CareGiver.query.filter_by(care_giver_id=sub).first()
         not_found_message = 'CareGiver not found'

@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from app import db
+from app.models.admin import Admin
 from app.models.patient import Patient
 from app.models.caregiver import CareGiver
 from app.models.doctor import Doctor
@@ -224,6 +225,10 @@ def me():
         user = CareGiver.query.filter_by(care_giver_id=sub).first()
         if not user: raise NotFoundError('CareGiver not found')
         return success_response(data=_caregiver_to_dict(user))
+    if role == 'admin':
+        user = Admin.query.filter_by(admin_id=sub).first()
+        if not user: raise NotFoundError('Admin not found')
+        return success_response(data={'admin': {'admin_id': user.admin_id, 'name': user.name, 'email': user.email, 'active': user.active}})
     user = Patient.query.filter_by(patient_id=sub).first()
     if not user: raise NotFoundError('Patient not found')
     return success_response(data=_patient_to_dict(user))
